@@ -1,6 +1,6 @@
 from torch.utils.tensorboard import SummaryWriter
 from dqn import DQN
-from utils import RewardTracker, ReplayBuffer, EpsilonTracker
+from utils import ReplayBuffer, EpsilonTracker
 from agents import VanillaDQNAgent
 
 import click
@@ -8,6 +8,8 @@ import gym
 import logging
 import os
 import numpy as np
+import gym.wrappers
+import torch
 
 
 def play_and_record(initial_state, agent, env, replay_buffer, n_steps=1):
@@ -68,19 +70,19 @@ def run(
     env_name: str,
     agent: object,
     total_steps: int,
-    # reward_tracker: RewardTracker,
     eps_tracker: EpsilonTracker,
+    eval_frequency: int,
     writer: SummaryWriter,
     replay_buffer: ReplayBuffer = None,
     batch_size: int = None,
-    timesteps_per_epoch: int = 1
+    timesteps_per_epoch: int = 1,
 ):
-    # total_steps = 4 * 10**4
-    eval_freq = 1000
+
     state = env.reset()
 
     for step in np.arange(total_steps + 1):
 
+        # Play timesteps_per_epoch and return cumulative reward and last state
         _, state = play_and_record(
             state,
             agent,
@@ -89,15 +91,16 @@ def run(
             timesteps_per_epoch
         )
 
+        # Update epsilon
         agent.epsilon = eps_tracker(step)
         writer.add_scalar('epsilon', agent.epsilon, step)
 
+        # Sample batch and train agent
         batch = replay_buffer.sample(batch_size)
-
         agent.update(batch, step, writer=writer)
 
-        if step % eval_freq == 0:
-            # eval the agent
+        if step % eval_frequency == 0:
+            # Eval the agent
             eval_reward = evaluate(
                 make_env(env_name, seed=int(step)),
                 agent,
@@ -106,9 +109,13 @@ def run(
                 t_max=1000
             )
             logger.info(
-                f'step: {step}, mean_reward_per_episode: {eval_reward}')
-            writer.add_scalar('eval/mean_reward_per_episode',
-                              eval_reward, step)
+                f'step: {step}, mean_reward_per_episode: {eval_reward}'
+            )
+            writer.add_scalar(
+                'eval/mean_reward_per_episode',
+                eval_reward,
+                step
+            )
 
 
 def fill_buffer(state, env, agent, replay_buffer):
@@ -118,10 +125,22 @@ def fill_buffer(state, env, agent, replay_buffer):
     return replay_buffer
 
 
+def record_video(env_name: str, agent: object, output_path: str):
+    env_monitor = gym.wrappers.Monitor(
+        make_env(env_name),
+        directory=os.path.join(output_path, "videos"),
+        force=True
+    )
+    sessions = [
+        evaluate(env_monitor, agent, n_games=1, greedy=True)
+        for _ in range(10)
+    ]
+    env_monitor.close()
+
+
 @click.command()
 @click.option('-e', '--env_name', type=str, default='CartPole-v1')
 @click.option('-t', '--total_steps', type=int, default=4*10**4)
-@click.option('-target', '--target', type=float, default=None)
 @click.option('-gamma', '--gamma', type=float, default=0.99)
 @click.option('-start_eps', '--start_epsilon', type=float, default=1.0)
 @click.option('-end_eps', '--end_epsilon', type=float, default=0.01)
@@ -130,11 +149,11 @@ def fill_buffer(state, env, agent, replay_buffer):
 @click.option('-replay_size', '--replay_buffer_size', type=int, default=10**4)
 @click.option('-batch_size', '--replay_batch_size', type=int, default=32)
 @click.option('-lr', '--learning_rate', type=float, default=1e-4)
+@click.option('-eval', '--eval_frequency', type=int, default=1000)
 @click.option('-o', '--output_path', type=str, default='./runs')
 def main(
     env_name: str,
     total_steps: int,
-    target: float,
     gamma: float,
     start_epsilon: float,
     end_epsilon: float,
@@ -143,26 +162,26 @@ def main(
     replay_buffer_size: int,
     replay_batch_size: int,
     learning_rate: float,
+    eval_frequency: int,
     output_path: str
 ):
+    # Add hyperparameters to tensorboard
+    hparams = {key: val for (key, val) in locals().items() if val is not None}
+    writer = SummaryWriter(output_path)
+    writer.add_hparams(hparams, {})
 
     logger.info('Starting experiment:')
     logger.info(f'Environment: {env_name}')
 
-    hparams = {key: val for (key, val) in locals().items() if val is not None}
-    writer = SummaryWriter(output_path)
-    writer.add_hparams(
-        hparams,
-        {}
-    )
+    # Setup device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    logger.info(f'Device: {device}')
 
     # Setup environment
     env = make_env(env_name)
     state_shape, n_actions = env.observation_space.shape, env.action_space.n
     # Init replay buffer
     replay_buffer = ReplayBuffer(replay_buffer_size)
-    # Init reward tracker
-    # reward_tracker = RewardTracker(rewards_num, target)
     # Init epsilon tracker
     eps_tracker = EpsilonTracker(start_epsilon, end_epsilon, n_iter_decay)
 
@@ -182,14 +201,18 @@ def main(
     # Run training
     run(
         env,
+        env_name,
         agent,
         total_steps,
-        # reward_tracker,
         eps_tracker,
+        eval_frequency,
         writer,
         replay_buffer,
-        replay_batch_size
+        replay_batch_size,
     )
+
+    # Record video with learned agent
+    record_video(env_name, agent, output_path)
 
 
 if __name__ == '__main__':

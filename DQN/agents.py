@@ -17,15 +17,19 @@ class VanillaDQNAgent:
         refresh_target_network_freq: int,
         epsilon: float,
         gamma: float = 0.99,
-        lr: float = 1e-4
+        lr: float = 1e-4,
+        device: str = 'cpu'
     ):
 
         self.model = model
+        self.model.to(device)
+
         self.target_network = copy.deepcopy(model)
         self.refresh_target_network_freq = refresh_target_network_freq
         self.gamma = gamma
         self.epsilon = epsilon
         self.max_grad_norm = 5000
+        self.device = device
 
         self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -33,13 +37,9 @@ class VanillaDQNAgent:
         self,
         batch: Tuple[ndarray, ...],
         step: int,
-        device: str = 'cpu',
         writer: SummaryWriter = None
     ) -> NoReturn:
-        loss = self.compute_loss(
-            batch,
-            device
-        )
+        loss = self.compute_loss(batch)
         self.optimizer.zero_grad()
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
@@ -58,22 +58,21 @@ class VanillaDQNAgent:
 
     def compute_loss(
         self,
-        batch: Tuple[ndarray, ...],
-        device: str
+        batch: Tuple[ndarray, ...]
     ) -> tensor:
 
         states, actions, rewards, next_states, is_done = batch
         # Batch of states and next states of shape: [batch_size, *state_shape]
-        states = torch.tensor(states, device=device, dtype=torch.float)
+        states = torch.tensor(states, device=self.device, dtype=torch.float)
         next_states = torch.tensor(
-            next_states, device=device, dtype=torch.float)
+            next_states, device=self.device, dtype=torch.float)
 
         # Batches of actions, rewards and done flag of shape: [batch_size]
-        actions = torch.tensor(actions, device=device, dtype=torch.long)
-        rewards = torch.tensor(rewards, device=device, dtype=torch.float)
+        actions = torch.tensor(actions, device=self.device, dtype=torch.long)
+        rewards = torch.tensor(rewards, device=self.device, dtype=torch.float)
         is_done = torch.tensor(
             is_done.astype('float32'),
-            device=device,
+            device=self.device,
             dtype=torch.float
         )
         is_not_done = 1 - is_done
