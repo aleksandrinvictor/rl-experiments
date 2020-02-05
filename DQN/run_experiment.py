@@ -1,7 +1,8 @@
 from torch.utils.tensorboard import SummaryWriter
-from dqn import DQN
+from dqn import DQN, ConvDQN
 from utils import ReplayBuffer, EpsilonTracker
 from agents import VanillaDQNAgent
+from tqdm import tqdm
 
 import click
 import gym
@@ -10,6 +11,7 @@ import os
 import numpy as np
 import gym.wrappers
 import torch
+import random
 
 
 def play_and_record(initial_state, agent, env, replay_buffer, n_steps=1):
@@ -58,8 +60,13 @@ def make_env(env_name: str, seed=None):
     # CartPole is wrapped with a time limit wrapper by default
     if env_name == 'CartPole-v1':
         env = gym.make(env_name).unwrapped
+    elif env_name == 'BreakoutNoFrameskip-v4':
+        env = gym.make(env_name)
+        env = gym.wrappers.AtariPreprocessing(env, frame_skip=4)
+        env = gym.wrappers.FrameStack(env, 4)
     else:
         env = gym.make(env_name)
+
     if seed is not None:
         env.seed(seed)
     return env
@@ -104,9 +111,8 @@ def run(
             eval_reward = evaluate(
                 make_env(env_name, seed=int(step)),
                 agent,
-                n_games=3,
-                greedy=True,
-                t_max=1000
+                n_games=15,
+                greedy=True
             )
             logger.info(
                 f'step: {step}, mean_reward_per_episode: {eval_reward}'
@@ -119,8 +125,11 @@ def run(
 
 
 def fill_buffer(state, env, agent, replay_buffer):
-    for i in range(100):
+    for i in tqdm(range(100), 'Filling replay buffer'):
         play_and_record(state, agent, env, replay_buffer, n_steps=10**2)
+
+        if len(replay_buffer) == 10**4:
+            break
 
     return replay_buffer
 
@@ -140,11 +149,11 @@ def record_video(env_name: str, agent: object, output_path: str):
 
 @click.command()
 @click.option('-e', '--env_name', type=str, default='CartPole-v1')
-@click.option('-t', '--total_steps', type=int, default=4*10**4)
+@click.option('-t', '--total_steps', type=float, default=4*10**4)
 @click.option('-gamma', '--gamma', type=float, default=0.99)
 @click.option('-start_eps', '--start_epsilon', type=float, default=1.0)
 @click.option('-end_eps', '--end_epsilon', type=float, default=0.01)
-@click.option('-n_iter_decay', '--n_iter_decay', type=int, default=4*10**4)
+@click.option('-n_iter_decay', '--n_iter_decay', type=float, default=4*10**4)
 @click.option('-refresh_freq', '--refresh_target_network_freq', type=float, default=100)
 @click.option('-replay_size', '--replay_buffer_size', type=int, default=10**4)
 @click.option('-batch_size', '--replay_batch_size', type=int, default=32)
@@ -170,23 +179,36 @@ def main(
     writer = SummaryWriter(output_path)
     writer.add_hparams(hparams, {})
 
+    # Set seed
+    seed = 42
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
     logger.info('Starting experiment:')
     logger.info(f'Environment: {env_name}')
+
+    # Setup environment
+    env = make_env(env_name, seed)
+    state_shape, n_actions = env.observation_space.shape, env.action_space.n
+    logger.info(f'State shape: {state_shape}')
+    logger.info(f'n actions: {n_actions}')
 
     # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f'Device: {device}')
 
-    # Setup environment
-    env = make_env(env_name)
-    state_shape, n_actions = env.observation_space.shape, env.action_space.n
     # Init replay buffer
     replay_buffer = ReplayBuffer(replay_buffer_size)
     # Init epsilon tracker
     eps_tracker = EpsilonTracker(start_epsilon, end_epsilon, n_iter_decay)
 
-    # Create newural network to approximate Q-values
-    model = DQN(state_shape, n_actions)
+    # Create neural network to approximate Q-values
+    if env_name == 'BreakoutNoFrameskip-v4':
+        model = ConvDQN(state_shape, n_actions)
+    else:
+        model = DQN(state_shape, n_actions)
+
     # Create Q-learning agent
     agent = VanillaDQNAgent(
         model,
