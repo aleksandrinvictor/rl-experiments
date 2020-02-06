@@ -2,7 +2,8 @@ from torch.utils.tensorboard import SummaryWriter
 from dqn import DQN, ConvDQN
 from utils import ReplayBuffer, EpsilonTracker
 from agents import VanillaDQNAgent
-from tqdm import tqdm
+from tqdm import tqdm, trange
+import wrappers
 
 import click
 import gym
@@ -12,6 +13,33 @@ import numpy as np
 import gym.wrappers
 import torch
 import random
+
+
+def PrimaryAtariWrap(env, clip_rewards=True):
+    assert 'NoFrameskip' in env.spec.id
+
+    # This wrapper holds the same action for <skip> frames and outputs
+    # the maximal pixel value of 2 last frames (to handle blinking
+    # in some envs)
+    env = wrappers.MaxAndSkipEnv(env, skip=4)
+
+    # This wrapper sends done=True when each life is lost
+    # (not all the 5 lives that are givern by the game rules).
+    # It should make easier for the agent to understand that losing is bad.
+    env = wrappers.EpisodicLifeEnv(env)
+
+    # This wrapper laucnhes the ball when an episode starts.
+    # Without it the agent has to learn this action, too.
+    # Actually it can but learning would take longer.
+    env = wrappers.FireResetEnv(env)
+
+    # This wrapper transforms rewards to {-1, 0, 1} according to their sign
+    if clip_rewards:
+        env = wrappers.ClipRewardEnv(env)
+
+    # This wrapper is yours :)
+    env = wrappers.PreprocessAtariObs(env)
+    return env
 
 
 def play_and_record(initial_state, agent, env, replay_buffer, n_steps=1):
@@ -57,18 +85,19 @@ def evaluate(env, agent, n_games=1, greedy=False, t_max=10000):
 
 
 def make_env(env_name: str, seed=None):
-    # CartPole is wrapped with a time limit wrapper by default
+    # CartPole is wrapped with a time limit wrapper by default    
     if env_name == 'CartPole-v1':
         env = gym.make(env_name).unwrapped
     elif env_name == 'BreakoutNoFrameskip-v4':
-        env = gym.make(env_name)
-        env = gym.wrappers.AtariPreprocessing(env, frame_skip=4)
-        env = gym.wrappers.FrameStack(env, 4)
+        env = gym.make(env_name)  # create raw env
+        if seed is not None:
+            env.seed(seed)
+        env = PrimaryAtariWrap(env, clip_rewards=True)
+        env = wrappers.FrameBuffer(env, n_frames=4, dim_order='pytorch')
+        return env
     else:
         env = gym.make(env_name)
 
-    if seed is not None:
-        env.seed(seed)
     return env
 
 
@@ -87,7 +116,7 @@ def run(
 
     state = env.reset()
 
-    for step in np.arange(total_steps + 1):
+    for step in trange(int(total_steps + 1)):
 
         # Play timesteps_per_epoch and return cumulative reward and last state
         _, state = play_and_record(
@@ -97,6 +126,7 @@ def run(
             replay_buffer,
             timesteps_per_epoch
         )
+        # print(evaluate(env, agent, n_games=15))
 
         # Update epsilon
         agent.epsilon = eps_tracker(step)
@@ -105,6 +135,8 @@ def run(
         # Sample batch and train agent
         batch = replay_buffer.sample(batch_size)
         agent.update(batch, step, writer=writer)
+
+        # print(evaluate(env, agent, n_games=15))
 
         if step % eval_frequency == 0:
             # Eval the agent
@@ -205,18 +237,25 @@ def main(
 
     # Create neural network to approximate Q-values
     if env_name == 'BreakoutNoFrameskip-v4':
-        model = ConvDQN(state_shape, n_actions)
+        model = ConvDQN(state_shape, n_actions).to(device)
+        target_network = ConvDQN(state_shape, n_actions).to(device)
+        target_network.load_state_dict(model.state_dict())
     else:
         model = DQN(state_shape, n_actions)
+        target_network = DQN(state_shape, n_actions).to(device)
+        target_network.load_state_dict(model.state_dict())
 
     # Create Q-learning agent
     agent = VanillaDQNAgent(
         model,
+        target_network,
         refresh_target_network_freq,
         start_epsilon,
         gamma,
-        learning_rate
+        learning_rate,
+        device
     )
+    # print(evaluate(env, agent, n_games=15))
     # Fill replay buffer with tuples (state, action, reward, next_state, done)
     replay_buffer = fill_buffer(env.reset(), env, agent, replay_buffer)
 
@@ -234,7 +273,7 @@ def main(
     )
 
     # Record video with learned agent
-    record_video(env_name, agent, output_path)
+    # record_video(env_name, agent, output_path)
 
 
 if __name__ == '__main__':

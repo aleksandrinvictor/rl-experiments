@@ -14,6 +14,7 @@ class VanillaDQNAgent:
     def __init__(
         self,
         model: nn.Module,
+        target_network: nn.Module,
         refresh_target_network_freq: int,
         epsilon: float,
         gamma: float = 0.99,
@@ -22,16 +23,16 @@ class VanillaDQNAgent:
     ):
 
         self.model = model
-        self.model.to(device)
+        # self.model.to(device)
 
-        self.target_network = copy.deepcopy(model)
+        self.target_network = target_network
         self.refresh_target_network_freq = refresh_target_network_freq
         self.gamma = gamma
         self.epsilon = epsilon
-        self.max_grad_norm = 5000
+        self.max_grad_norm = 50
         self.device = device
 
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
 
     def update(
         self,
@@ -40,13 +41,13 @@ class VanillaDQNAgent:
         writer: SummaryWriter = None
     ) -> NoReturn:
         loss = self.compute_loss(batch)
-        self.optimizer.zero_grad()
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
             self.model.parameters(),
             self.max_grad_norm
         )
         self.optimizer.step()
+        self.optimizer.zero_grad()
 
         if writer is not None:
             writer.add_scalar('train_params/grad_norm', grad_norm, step)

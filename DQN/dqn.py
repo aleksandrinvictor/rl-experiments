@@ -55,7 +55,7 @@ class ConvDQN(nn.Module):
         self.conv2 = nn.Conv2d(16, 32, 3, 2)
         self.conv3 = nn.Conv2d(32, 64, 3, 2)
         self.flatten = nn.Flatten()
-        self.dense1 = nn.Linear(5184, 256)
+        self.dense1 = nn.Linear(3136, 256)
         self.dense2 = nn.Linear(256, n_actions)
 
     def forward(self, state_t):
