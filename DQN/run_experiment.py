@@ -1,7 +1,7 @@
 from torch.utils.tensorboard import SummaryWriter
 from dqn import DQN, ConvDQN
 from utils import ReplayBuffer, EpsilonTracker
-from agents import VanillaDQNAgent
+from agents import VanillaDQNAgent, DoubleDQNAgent
 from tqdm import tqdm, trange
 import wrappers
 
@@ -144,7 +144,8 @@ def run(
                 make_env(env_name, seed=int(step)),
                 agent,
                 n_games=15,
-                greedy=True
+                greedy=True,
+                t_max=100
             )
             logger.info(
                 f'step: {step}, mean_reward_per_episode: {eval_reward}'
@@ -172,6 +173,8 @@ def record_video(env_name: str, agent: object, output_path: str):
         directory=os.path.join(output_path, "videos"),
         force=True
     )
+    # env = make_env(env_name)
+    # env.monitor.start(os.path.join(output_path, "videos"), force=True)
     sessions = [
         evaluate(env_monitor, agent, n_games=1, greedy=True)
         for _ in range(10)
@@ -181,6 +184,7 @@ def record_video(env_name: str, agent: object, output_path: str):
 
 @click.command()
 @click.option('-e', '--env_name', type=str, default='CartPole-v1')
+@click.option('-a', '--agent_type', type=str, default='vanilla')
 @click.option('-t', '--total_steps', type=float, default=4*10**4)
 @click.option('-gamma', '--gamma', type=float, default=0.99)
 @click.option('-start_eps', '--start_epsilon', type=float, default=1.0)
@@ -194,6 +198,7 @@ def record_video(env_name: str, agent: object, output_path: str):
 @click.option('-o', '--output_path', type=str, default='./runs')
 def main(
     env_name: str,
+    agent_type: str,
     total_steps: int,
     gamma: float,
     start_epsilon: float,
@@ -241,20 +246,31 @@ def main(
         target_network = ConvDQN(state_shape, n_actions).to(device)
         target_network.load_state_dict(model.state_dict())
     else:
-        model = DQN(state_shape, n_actions)
+        model = DQN(state_shape, n_actions).to(device)
         target_network = DQN(state_shape, n_actions).to(device)
         target_network.load_state_dict(model.state_dict())
 
     # Create Q-learning agent
-    agent = VanillaDQNAgent(
-        model,
-        target_network,
-        refresh_target_network_freq,
-        start_epsilon,
-        gamma,
-        learning_rate,
-        device
-    )
+    if agent_type == 'vanilla':
+        agent = VanillaDQNAgent(
+            model,
+            target_network,
+            refresh_target_network_freq,
+            start_epsilon,
+            gamma,
+            learning_rate,
+            device
+        )
+    elif agent_type == 'double':
+        agent = DoubleDQNAgent(
+            model,
+            target_network,
+            refresh_target_network_freq,
+            start_epsilon,
+            gamma,
+            learning_rate,
+            device
+        )
     # print(evaluate(env, agent, n_games=15))
     # Fill replay buffer with tuples (state, action, reward, next_state, done)
     replay_buffer = fill_buffer(env.reset(), env, agent, replay_buffer)
