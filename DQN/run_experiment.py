@@ -1,5 +1,5 @@
 from torch.utils.tensorboard import SummaryWriter
-from dqn import DQN, ConvDQN
+from dqn import DQN, ConvDQN, DuelingDQN
 from utils import ReplayBuffer, EpsilonTracker
 from agents import VanillaDQNAgent, DoubleDQNAgent
 from tqdm import tqdm, trange
@@ -13,33 +13,6 @@ import numpy as np
 import gym.wrappers
 import torch
 import random
-
-
-def PrimaryAtariWrap(env, clip_rewards=True):
-    assert 'NoFrameskip' in env.spec.id
-
-    # This wrapper holds the same action for <skip> frames and outputs
-    # the maximal pixel value of 2 last frames (to handle blinking
-    # in some envs)
-    env = wrappers.MaxAndSkipEnv(env, skip=4)
-
-    # This wrapper sends done=True when each life is lost
-    # (not all the 5 lives that are givern by the game rules).
-    # It should make easier for the agent to understand that losing is bad.
-    env = wrappers.EpisodicLifeEnv(env)
-
-    # This wrapper laucnhes the ball when an episode starts.
-    # Without it the agent has to learn this action, too.
-    # Actually it can but learning would take longer.
-    env = wrappers.FireResetEnv(env)
-
-    # This wrapper transforms rewards to {-1, 0, 1} according to their sign
-    if clip_rewards:
-        env = wrappers.ClipRewardEnv(env)
-
-    # This wrapper is yours :)
-    env = wrappers.PreprocessAtariObs(env)
-    return env
 
 
 def play_and_record(initial_state, agent, env, replay_buffer, n_steps=1):
@@ -92,8 +65,14 @@ def make_env(env_name: str, seed=None):
         env = gym.make(env_name)  # create raw env
         if seed is not None:
             env.seed(seed)
-        env = PrimaryAtariWrap(env, clip_rewards=True)
-        env = wrappers.FrameBuffer(env, n_frames=4, dim_order='pytorch')
+        
+        env = gym.wrappers.AtariPreprocessing(
+            env,
+            terminal_on_life_loss=True
+        )
+        env = gym.wrappers.FrameStack(env, 4)
+        env = wrappers.ClipRewardEnv(env)
+        env = wrappers.FireResetEnv(env)
         return env
     else:
         env = gym.make(env_name)
@@ -157,11 +136,11 @@ def run(
             )
 
 
-def fill_buffer(state, env, agent, replay_buffer):
+def fill_buffer(state, env, agent, replay_buffer, replay_size):
     for i in tqdm(range(100), 'Filling replay buffer'):
         play_and_record(state, agent, env, replay_buffer, n_steps=10**2)
 
-        if len(replay_buffer) == 10**4:
+        if len(replay_buffer) == replay_size:
             break
 
     return replay_buffer
@@ -185,6 +164,7 @@ def record_video(env_name: str, agent: object, output_path: str):
 @click.command()
 @click.option('-e', '--env_name', type=str, default='CartPole-v1')
 @click.option('-a', '--agent_type', type=str, default='vanilla')
+@click.option('-net', '--network_type', type=str, default='dqn')
 @click.option('-t', '--total_steps', type=float, default=4*10**4)
 @click.option('-gamma', '--gamma', type=float, default=0.99)
 @click.option('-start_eps', '--start_epsilon', type=float, default=1.0)
@@ -199,6 +179,7 @@ def record_video(env_name: str, agent: object, output_path: str):
 def main(
     env_name: str,
     agent_type: str,
+    network_type: str,
     total_steps: int,
     gamma: float,
     start_epsilon: float,
@@ -242,9 +223,15 @@ def main(
 
     # Create neural network to approximate Q-values
     if env_name == 'BreakoutNoFrameskip-v4':
-        model = ConvDQN(state_shape, n_actions).to(device)
-        target_network = ConvDQN(state_shape, n_actions).to(device)
-        target_network.load_state_dict(model.state_dict())
+        if network_type == 'dqn':
+            model = ConvDQN(state_shape, n_actions).to(device)
+            target_network = ConvDQN(state_shape, n_actions).to(device)
+            target_network.load_state_dict(model.state_dict())
+        elif network_type == 'dueling':
+            model = DuelingDQN(state_shape, n_actions).to(device)
+            target_network = DuelingDQN(state_shape, n_actions).to(device)
+            target_network.load_state_dict(model.state_dict())
+            
     else:
         model = DQN(state_shape, n_actions).to(device)
         target_network = DQN(state_shape, n_actions).to(device)
@@ -273,7 +260,13 @@ def main(
         )
     # print(evaluate(env, agent, n_games=15))
     # Fill replay buffer with tuples (state, action, reward, next_state, done)
-    replay_buffer = fill_buffer(env.reset(), env, agent, replay_buffer)
+    replay_buffer = fill_buffer(
+        env.reset(), 
+        env, 
+        agent, 
+        replay_buffer, 
+        replay_buffer_size
+    )
 
     # Run training
     run(
