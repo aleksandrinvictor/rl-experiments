@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch
 
 
-class DQN(nn.Module):
+class MLP(nn.Module):
     def __init__(self, state_shape, n_actions):
 
         super().__init__()
@@ -43,7 +43,7 @@ class DQN(nn.Module):
         return qvalues.data.cpu().numpy()
 
 
-class ConvDQN(nn.Module):
+class Cnn(nn.Module):
     def __init__(self, state_shape, n_actions):
 
         super().__init__()
@@ -86,9 +86,9 @@ class ConvDQN(nn.Module):
         return qvalues.data.cpu().numpy()
 
 
-class DuelingDQN(nn.Module):
+class DuelingCnn(nn.Module):
     def __init__(self, state_shape, n_actions):
-        
+
         super().__init__()
         self.n_actions = n_actions
         self.state_shape = state_shape
@@ -115,7 +115,6 @@ class DuelingDQN(nn.Module):
             nn.ReLU(),
             nn.Linear(512, n_actions)
         )
-    
 
     def forward(self, state_t):
         conv_out = self.flatten(self.conv(state_t))
@@ -124,13 +123,13 @@ class DuelingDQN(nn.Module):
         advantage = self.advantage_dense(conv_out)
 
         qvalues = (
-            state_value 
-            + advantage 
+            state_value
+            + advantage
             - 1 / self.n_actions * torch.sum(advantage, dim=1)[:, None]
         )
 
         return qvalues
-    
+
     def get_qvalues(self, states):
         """
         like forward, but works on numpy arrays, not tensors

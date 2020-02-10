@@ -19,6 +19,7 @@ class VanillaDQNAgent:
         epsilon: float,
         gamma: float = 0.99,
         lr: float = 1e-4,
+        max_grad_norm: float = None,
         device: str = 'cpu'
     ):
 
@@ -29,7 +30,7 @@ class VanillaDQNAgent:
         self.refresh_target_network_freq = refresh_target_network_freq
         self.gamma = gamma
         self.epsilon = epsilon
-        self.max_grad_norm = 50
+        self.max_grad_norm = max_grad_norm
         self.device = device
 
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
@@ -42,10 +43,13 @@ class VanillaDQNAgent:
     ) -> NoReturn:
         loss = self.compute_loss(batch)
         loss.backward()
-        grad_norm = nn.utils.clip_grad_norm_(
-            self.model.parameters(),
-            self.max_grad_norm
-        )
+
+        if self.max_grad_norm is not None:
+            grad_norm = nn.utils.clip_grad_norm_(
+                self.model.parameters(),
+                self.max_grad_norm
+            )
+
         self.optimizer.step()
         self.optimizer.zero_grad()
 
@@ -135,6 +139,7 @@ class DoubleDQNAgent(VanillaDQNAgent):
         epsilon: float,
         gamma: float = 0.99,
         lr: float = 1e-4,
+        max_grad_norm: float = None,
         device: str = 'cpu'
     ):
         super().__init__(
@@ -144,9 +149,9 @@ class DoubleDQNAgent(VanillaDQNAgent):
             epsilon,
             gamma,
             lr,
+            max_grad_norm,
             device
         )
-    
 
     def compute_loss(
         self,
@@ -196,4 +201,3 @@ class DoubleDQNAgent(VanillaDQNAgent):
             predicted_qvalues_for_actions - target_qvalues_for_actions.detach()) ** 2)
 
         return loss
-

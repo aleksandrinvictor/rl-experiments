@@ -1,16 +1,15 @@
 from torch.utils.tensorboard import SummaryWriter
-from dqn import DQN, ConvDQN, DuelingDQN
-from utils import ReplayBuffer, EpsilonTracker
+from rl_experiments.common.replay_buffer import ReplayBuffer
+from rl_experiments.common.models import MLP, Cnn, DuelingCnn
+from rl_experiments.common.utils import LinearDecay, make_env, get_env_type
 from agents import VanillaDQNAgent, DoubleDQNAgent
 from tqdm import tqdm, trange
-import wrappers
 
 import click
 import gym
 import logging
 import os
 import numpy as np
-import gym.wrappers
 import torch
 import random
 
@@ -55,29 +54,6 @@ def evaluate(env, agent, n_games=1, greedy=False, t_max=10000):
 
         rewards.append(reward)
     return np.mean(rewards)
-
-
-def make_env(env_name: str, seed=None):
-    # CartPole is wrapped with a time limit wrapper by default    
-    if env_name == 'CartPole-v1':
-        env = gym.make(env_name).unwrapped
-    elif env_name == 'BreakoutNoFrameskip-v4':
-        env = gym.make(env_name)  # create raw env
-        if seed is not None:
-            env.seed(seed)
-        
-        env = gym.wrappers.AtariPreprocessing(
-            env,
-            terminal_on_life_loss=True
-        )
-        env = gym.wrappers.FrameStack(env, 4)
-        env = wrappers.ClipRewardEnv(env)
-        env = wrappers.FireResetEnv(env)
-        return env
-    else:
-        env = gym.make(env_name)
-
-    return env
 
 
 def run(
@@ -174,8 +150,10 @@ def record_video(env_name: str, agent: object, output_path: str):
 @click.option('-replay_size', '--replay_buffer_size', type=int, default=10**4)
 @click.option('-batch_size', '--replay_batch_size', type=int, default=32)
 @click.option('-lr', '--learning_rate', type=float, default=1e-4)
+@click.option('-max_grad', '--max_grad_norm', type=float, default=50)
 @click.option('-eval', '--eval_frequency', type=int, default=1000)
 @click.option('-o', '--output_path', type=str, default='./runs')
+@click.option('-seed', '--seed', type=int, default=42)
 def main(
     env_name: str,
     agent_type: str,
@@ -189,8 +167,10 @@ def main(
     replay_buffer_size: int,
     replay_batch_size: int,
     learning_rate: float,
+    max_grad_norm: float,
     eval_frequency: int,
-    output_path: str
+    output_path: str,
+    seed: int
 ):
     # Add hyperparameters to tensorboard
     hparams = {key: val for (key, val) in locals().items() if val is not None}
@@ -198,13 +178,13 @@ def main(
     writer.add_hparams(hparams, {})
 
     # Set seed
-    seed = 42
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
     logger.info('Starting experiment:')
     logger.info(f'Environment: {env_name}')
+    logger.info(f'Seed: {seed}')
 
     # Setup environment
     env = make_env(env_name, seed)
@@ -219,22 +199,23 @@ def main(
     # Init replay buffer
     replay_buffer = ReplayBuffer(replay_buffer_size)
     # Init epsilon tracker
-    eps_tracker = EpsilonTracker(start_epsilon, end_epsilon, n_iter_decay)
+    eps_tracker = LinearDecay(start_epsilon, end_epsilon, n_iter_decay)
 
+    env_type = get_env_type(env_name)
     # Create neural network to approximate Q-values
-    if env_name == 'BreakoutNoFrameskip-v4':
+    if env_type == 'atari':
         if network_type == 'dqn':
-            model = ConvDQN(state_shape, n_actions).to(device)
-            target_network = ConvDQN(state_shape, n_actions).to(device)
+            model = Cnn(state_shape, n_actions).to(device)
+            target_network = Cnn(state_shape, n_actions).to(device)
             target_network.load_state_dict(model.state_dict())
         elif network_type == 'dueling':
-            model = DuelingDQN(state_shape, n_actions).to(device)
-            target_network = DuelingDQN(state_shape, n_actions).to(device)
+            model = DuelingCnn(state_shape, n_actions).to(device)
+            target_network = DuelingCnn(state_shape, n_actions).to(device)
             target_network.load_state_dict(model.state_dict())
-            
-    else:
-        model = DQN(state_shape, n_actions).to(device)
-        target_network = DQN(state_shape, n_actions).to(device)
+
+    elif env_type == 'classic_control':
+        model = MLP(state_shape, n_actions).to(device)
+        target_network = MLP(state_shape, n_actions).to(device)
         target_network.load_state_dict(model.state_dict())
 
     # Create Q-learning agent
@@ -261,10 +242,10 @@ def main(
     # print(evaluate(env, agent, n_games=15))
     # Fill replay buffer with tuples (state, action, reward, next_state, done)
     replay_buffer = fill_buffer(
-        env.reset(), 
-        env, 
-        agent, 
-        replay_buffer, 
+        env.reset(),
+        env,
+        agent,
+        replay_buffer,
         replay_buffer_size
     )
 

@@ -1,5 +1,4 @@
 # taken from OpenAI baselines.
-import cv2
 from gym.spaces import Box
 from gym.core import ObservationWrapper
 from gym.core import Wrapper
@@ -36,4 +35,3 @@ class FireResetEnv(gym.Wrapper):
 
     def step(self, ac):
         return self.env.step(ac)
-
