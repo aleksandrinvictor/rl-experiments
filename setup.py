@@ -5,7 +5,7 @@ with open('requirements.txt') as f:
 
 setup(
     name='rl_experiments',
-    package_dir={'': 'rl_experiments'},
+    # package_dir={'': 'rl_experiments'},
     packages=find_packages(),
     install_requires=requirements,
     version='0.1',

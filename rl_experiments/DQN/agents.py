@@ -79,7 +79,7 @@ class VanillaDQNAgent:
         if step % self.refresh_target_network_freq == 0:
             self.target_network.load_state_dict(self.model.state_dict())
 
-        return td_errors.detach().numpy()
+        return td_errors.cpu().detach().numpy()
 
     def compute_td_errors(
         self,
@@ -179,12 +179,15 @@ class DoubleDQNAgent(VanillaDQNAgent):
             device
         )
 
-    def compute_loss(
+    def compute_td_errors(
         self,
-        batch: Tuple[ndarray, ...]
+        states: np.ndarray,
+        actions: np.ndarray,
+        rewards: np.ndarray,
+        next_states: np.ndarray,
+        is_done: np.ndarray
     ) -> tensor:
 
-        states, actions, rewards, next_states, is_done = batch
         # Batch of states and next states of shape: [batch_size, *state_shape]
         states = torch.tensor(states, device=self.device, dtype=torch.float)
         next_states = torch.tensor(
@@ -220,10 +223,10 @@ class DoubleDQNAgent(VanillaDQNAgent):
         target_qvalues_for_actions = rewards + \
             self.gamma * next_state_values * is_not_done
 
+        # Compute TD-error
         # mean squared error loss to minimize
         # Detaching target_qvalues_for_actions required
         # to not pass gradient through target network
-        loss = torch.mean((
-            predicted_qvalues_for_actions - target_qvalues_for_actions.detach()) ** 2)
+        td_errors = predicted_qvalues_for_actions - target_qvalues_for_actions.detach()
 
-        return loss
+        return td_errors

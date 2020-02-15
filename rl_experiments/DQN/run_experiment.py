@@ -124,9 +124,9 @@ def train(
             eval_reward = evaluate(
                 make_env(env_name, seed=int(step)),
                 agent,
-                n_games=15,
+                n_games=3,
                 greedy=True,
-                t_max=100
+                t_max=10000
             )
             logger.info(
                 f'step: {step}, mean_reward_per_episode: {eval_reward}'
@@ -157,7 +157,7 @@ def record_video(env_name: str, agent: object, output_path: str):
     # env = make_env(env_name)
     # env.monitor.start(os.path.join(output_path, "videos"), force=True)
     sessions = [
-        evaluate(env_monitor, agent, n_games=1, greedy=True)
+        evaluate(env_monitor, agent, n_games=10, greedy=True)
         for _ in range(10)
     ]
     env_monitor.close()
@@ -319,7 +319,7 @@ def main(
     )
 
     # Record video with learned agent
-    # record_video(env_name, agent, output_path)
+    record_video(env_name, agent, output_path)
 
 
 if __name__ == '__main__':
