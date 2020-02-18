@@ -30,13 +30,16 @@ def make_env(env_name: str, seed=None):
         env = gym.make(env_name).unwrapped
     elif env_type == 'atari':
         env = gym.make(env_name)
+        assert 'NoFrameskip' in env.spec.id
+
         env = gym.wrappers.AtariPreprocessing(
             env,
-            terminal_on_life_loss=True
+            terminal_on_life_loss=True,
         )
-        env = gym.wrappers.FrameStack(env, 4)
         env = wrappers.ClipRewardEnv(env)
         env = wrappers.FireResetEnv(env)
+        env = gym.wrappers.FrameStack(env, 4)
+
     else:
         raise ValueError('Unknown environment type')
 

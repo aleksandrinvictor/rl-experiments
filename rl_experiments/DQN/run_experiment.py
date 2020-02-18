@@ -24,7 +24,6 @@ def play_and_record(initial_state, agent, env, replay_buffer, n_steps=1):
     :returns: return sum of rewards over time and the state in which the env stays
     """
     s = initial_state
-    sum_rewards = 0
 
     # Play the game for n_steps as per instructions above
     for i in range(n_steps):
@@ -32,28 +31,30 @@ def play_and_record(initial_state, agent, env, replay_buffer, n_steps=1):
         next_s, r, done, _ = env.step(action)
 
         replay_buffer.add(s, action, r, next_s, done)
-        sum_rewards += r
         s = next_s
         if done:
             s = env.reset()
 
-    return sum_rewards, s
+    return s
 
 
-def evaluate(env, agent, n_games=1, greedy=False, t_max=10000):
+def evaluate(env, agent, greedy=False, t_max=10000):
     """ Plays n_games full games. If greedy, picks actions as argmax(qvalues). Returns mean reward. """
     rewards = []
-    for _ in range(n_games):
-        s = env.reset()
-        reward = 0
-        for _ in range(t_max):
-            action = agent.sample_actions([s], greedy)[0]
-            s, r, done, _ = env.step(action)
-            reward += r
-            if done:
-                break
+    s = env.reset()
+    reward = 0
+    for _ in range(t_max):
+        action = agent.sample_actions([s], greedy)[0]
+        s, r, done, _ = env.step(action)
+        reward += r
+        if done:
+            s = env.reset()
+            rewards.append(reward)
+            reward = 0
 
-        rewards.append(reward)
+    if len(rewards) == 0:
+        return reward
+
     return np.mean(rewards)
 
 
@@ -77,8 +78,8 @@ def train(
 
     for step in trange(int(total_steps + 1)):
 
-        # Play timesteps_per_epoch and return cumulative reward and last state
-        _, state = play_and_record(
+        # Play timesteps_per_epoch and return last state
+        state = play_and_record(
             state,
             agent,
             env,
@@ -124,7 +125,6 @@ def train(
             eval_reward = evaluate(
                 make_env(env_name, seed=int(step)),
                 agent,
-                n_games=3,
                 greedy=True,
                 t_max=10000
             )
@@ -139,11 +139,11 @@ def train(
 
 
 def fill_buffer(state, env, agent, replay_buffer, replay_size):
-    for i in tqdm(range(100), 'Filling replay buffer'):
-        play_and_record(state, agent, env, replay_buffer, n_steps=10**2)
+    # for i in tqdm(range(100), 'Filling replay buffer'):
+    play_and_record(state, agent, env, replay_buffer, n_steps=5000)
 
-        if len(replay_buffer) == replay_size:
-            break
+    # if len(replay_buffer) == replay_size:
+    #     break
 
     return replay_buffer
 
@@ -157,8 +157,7 @@ def record_video(env_name: str, agent: object, output_path: str):
     # env = make_env(env_name)
     # env.monitor.start(os.path.join(output_path, "videos"), force=True)
     sessions = [
-        evaluate(env_monitor, agent, n_games=10, greedy=True)
-        for _ in range(10)
+        evaluate(env_monitor, agent, greedy=True, t_max=100000)
     ]
     env_monitor.close()
 

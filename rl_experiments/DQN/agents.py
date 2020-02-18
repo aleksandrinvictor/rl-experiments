@@ -33,7 +33,8 @@ class VanillaDQNAgent:
         self.max_grad_norm = max_grad_norm
         self.device = device
 
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        # self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        self.optimizer = torch.optim.RMSprop(self.model.parameters(), lr=lr)
 
     def update(
         self,
@@ -62,17 +63,17 @@ class VanillaDQNAgent:
 
         loss.backward()
 
-        if self.max_grad_norm is not None:
-            grad_norm = nn.utils.clip_grad_norm_(
-                self.model.parameters(),
-                self.max_grad_norm
-            )
+        # if self.max_grad_norm is not None:
+        grad_norm = nn.utils.clip_grad_value_(
+            self.model.parameters(),
+            1
+        )
 
         self.optimizer.step()
         self.optimizer.zero_grad()
 
         if writer is not None:
-            writer.add_scalar('train_params/grad_norm', grad_norm, step)
+            # writer.add_scalar('train_params/grad_norm', grad_norm, step)
             writer.add_scalar('train_params/td_loss',
                               loss.data.cpu().item(), step)
 
