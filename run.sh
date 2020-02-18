@@ -15,7 +15,10 @@ do
       -end_eps 0.1 \
       -eps_iters 1000000 \
       -refresh_freq 10000 \
+      -lr 0.00025 \
       -eval 50000 \
+      -replay_size 1000000 \
+      -replay_start_size 50000 \
       -batch_size 32 \
       -prioritized False \
       -o ./runs/"$i"

@@ -40,22 +40,24 @@ def play_and_record(initial_state, agent, env, replay_buffer, n_steps=1):
 
 def evaluate(env, agent, greedy=False, t_max=10000):
     """ Plays n_games full games. If greedy, picks actions as argmax(qvalues). Returns mean reward. """
-    rewards = []
     s = env.reset()
-    reward = 0
+    total_reward = 0
+    n_episodes = 0
+    episode_reward = 0
     for _ in range(t_max):
         action = agent.sample_actions([s], greedy)[0]
         s, r, done, _ = env.step(action)
-        reward += r
+        episode_reward += r
         if done:
             s = env.reset()
-            rewards.append(reward)
-            reward = 0
+            n_episodes += 1
+            total_reward += episode_reward
+            episode_reward = 0
 
-    if len(rewards) == 0:
-        return reward
+    if n_episodes == 0:
+        return episode_reward
 
-    return np.mean(rewards)
+    return total_reward / n_episodes
 
 
 def train(
@@ -138,12 +140,9 @@ def train(
             )
 
 
-def fill_buffer(state, env, agent, replay_buffer, replay_size):
-    # for i in tqdm(range(100), 'Filling replay buffer'):
-    play_and_record(state, agent, env, replay_buffer, n_steps=5000)
-
-    # if len(replay_buffer) == replay_size:
-    #     break
+def fill_buffer(state, env, agent, replay_buffer, replay_buffer_start_size):
+    play_and_record(state, agent, env, replay_buffer,
+                    n_steps=replay_buffer_start_size)
 
     return replay_buffer
 
@@ -172,6 +171,7 @@ def record_video(env_name: str, agent: object, output_path: str):
 @click.option('-end_eps', '--end_epsilon', type=float, default=0.01)
 @click.option('-eps_iters', '--eps_iters', type=float, default=4*10**4)
 @click.option('-refresh_freq', '--refresh_target_network_freq', type=float, default=100)
+@click.option('-replay_start_size', '--replay_buffer_start_size', type=int, default=50000)
 @click.option('-replay_size', '--replay_buffer_size', type=int, default=10**4)
 @click.option('-prioritized', '--prioritized_replay', type=bool, default=False)
 @click.option('-prioritized_alpha', '--prioritized_replay_alpha', type=float, default=0.6)
@@ -195,6 +195,7 @@ def main(
     end_epsilon: float,
     eps_iters: int,
     refresh_target_network_freq: int,
+    replay_buffer_start_size: int,
     replay_buffer_size: int,
     prioritized_replay: bool,
     prioritized_replay_alpha: float,
@@ -298,7 +299,7 @@ def main(
         env,
         agent,
         replay_buffer,
-        replay_buffer_size
+        replay_buffer_start_size
     )
 
     # Run training
