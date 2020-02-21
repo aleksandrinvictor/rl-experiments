@@ -14,7 +14,6 @@ This repository contains my implementations for different Reinforcement Learning
 | Dueling DQN   | `done` | [Dueling Network Architectures for Deep Reinforcement Learning](https://arxiv.org/pdf/1511.06581.pdf) |
 | Prioritized Experience Replay   | `done` | [Prioritized Experience Replay](https://arxiv.org/abs/1511.05952) |
 | REINFORCE   | `done` | - |
-| Prioritized Experience Replay   | `done` | [Prioritized Experience Replay](https://arxiv.org/abs/1511.05952) |
 | A2C   | `TODO` | [OpenAI Baselines: ACKTR & A2C](https://openai.com/blog/baselines-acktr-a2c/) |
 | PPO   | `TODO` | [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347) |
 | DDPG   | `TODO` | [Continuous control with deep reinforcement learning](https://arxiv.org/abs/1509.02971) |
