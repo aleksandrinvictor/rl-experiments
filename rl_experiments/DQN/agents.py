@@ -33,40 +33,66 @@ class VanillaDQNAgent:
         self.max_grad_norm = max_grad_norm
         self.device = device
 
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        # self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        self.optimizer = torch.optim.RMSprop(self.model.parameters(), lr=lr)
 
     def update(
         self,
-        batch: Tuple[ndarray, ...],
+        states: np.ndarray,
+        actions: np.ndarray,
+        rewards: np.ndarray,
+        next_states: np.ndarray,
+        is_done: np.ndarray,
+        weights: np.ndarray,
+        batch_idxes: np.ndarray,
         step: int,
-        writer: SummaryWriter = None
+        writer: SummaryWriter = None,
+        prioritized_replay: bool = False
     ) -> NoReturn:
-        loss = self.compute_loss(batch)
+
+        td_errors = self.compute_td_errors(
+            states,
+            actions,
+            rewards,
+            next_states,
+            is_done
+        )
+        errors = td_errors ** 2
+        weights = torch.tensor(weights, dtype=torch.float, device=self.device)
+        loss = torch.mean(weights * errors)
+
         loss.backward()
 
-        if self.max_grad_norm is not None:
-            grad_norm = nn.utils.clip_grad_norm_(
-                self.model.parameters(),
-                self.max_grad_norm
-            )
+        # if self.max_grad_norm is not None:
+        grad_norm = nn.utils.clip_grad_value_(
+            self.model.parameters(),
+            1
+        )
 
         self.optimizer.step()
         self.optimizer.zero_grad()
 
         if writer is not None:
-            writer.add_scalar('train_params/grad_norm', grad_norm, step)
+            # writer.add_scalar('train_params/grad_norm', grad_norm, step)
             writer.add_scalar('train_params/td_loss',
                               loss.data.cpu().item(), step)
 
         if step % self.refresh_target_network_freq == 0:
             self.target_network.load_state_dict(self.model.state_dict())
 
-    def compute_loss(
+        return td_errors.cpu().detach().numpy()
+
+    def compute_td_errors(
         self,
-        batch: Tuple[ndarray, ...]
+        states: np.ndarray,
+        actions: np.ndarray,
+        rewards: np.ndarray,
+        next_states: np.ndarray,
+        is_done: np.ndarray
     ) -> tensor:
 
-        states, actions, rewards, next_states, is_done = batch
+        # states, actions, rewards, next_states, is_done = batch
+
         # Batch of states and next states of shape: [batch_size, *state_shape]
         states = torch.tensor(states, device=self.device, dtype=torch.float)
         next_states = torch.tensor(
@@ -102,13 +128,14 @@ class VanillaDQNAgent:
         target_qvalues_for_actions = rewards + \
             self.gamma * next_state_values * is_not_done
 
+        # Compute TD-error
+        td_errors = predicted_qvalues_for_actions - target_qvalues_for_actions.detach()
         # mean squared error loss to minimize
         # Detaching target_qvalues_for_actions required
         # to not pass gradient through target network
-        loss = torch.mean((
-            predicted_qvalues_for_actions - target_qvalues_for_actions.detach()) ** 2)
+        # loss = torch.mean((td_errors) ** 2)
 
-        return loss
+        return td_errors
 
     def sample_actions(self, states: List[np.ndarray], greedy: bool = False) -> np.ndarray:
         """pick actions given qvalues. Uses epsilon-greedy exploration strategy. """
@@ -153,12 +180,15 @@ class DoubleDQNAgent(VanillaDQNAgent):
             device
         )
 
-    def compute_loss(
+    def compute_td_errors(
         self,
-        batch: Tuple[ndarray, ...]
+        states: np.ndarray,
+        actions: np.ndarray,
+        rewards: np.ndarray,
+        next_states: np.ndarray,
+        is_done: np.ndarray
     ) -> tensor:
 
-        states, actions, rewards, next_states, is_done = batch
         # Batch of states and next states of shape: [batch_size, *state_shape]
         states = torch.tensor(states, device=self.device, dtype=torch.float)
         next_states = torch.tensor(
@@ -194,10 +224,10 @@ class DoubleDQNAgent(VanillaDQNAgent):
         target_qvalues_for_actions = rewards + \
             self.gamma * next_state_values * is_not_done
 
+        # Compute TD-error
         # mean squared error loss to minimize
         # Detaching target_qvalues_for_actions required
         # to not pass gradient through target network
-        loss = torch.mean((
-            predicted_qvalues_for_actions - target_qvalues_for_actions.detach()) ** 2)
+        td_errors = predicted_qvalues_for_actions - target_qvalues_for_actions.detach()
 
-        return loss
+        return td_errors
