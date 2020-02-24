@@ -1,5 +1,5 @@
 from torch import tensor
-from typing import NoReturn
+from typing import NoReturn, List, Any
 
 import torch
 import torch.nn as nn
@@ -23,84 +23,105 @@ class REINFORCE:
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr)
         self.device = device
 
-    def get_cumulative_rewards(
-        self,
-        rewards: np.ndarray,  # rewards at each step
-    ) -> np.ndarray:
+    def get_actions(self, states: np.ndarray) -> np.ndarray:
+        """ Takes actions for given states
+        Args:
+            states: states from trajectory
+        Returns:
+            np.ndarray of choosen actions.
+            len(returned actions) = len(states)
         """
-        take a list of immediate rewards r(s,a) for the whole session 
-        compute cumulative returns (a.k.a. G(s,a) in Sutton '16)
-        G_t = r_t + gamma*r_{t+1} + gamma^2*r_{t+2} + ...
-
-        The simple way to compute cumulative rewards is to iterate from last to first time tick
-        and compute G_t = r_t + gamma*G_{t+1} recurrently
-
-        You must return an array/list of cumulative rewards with as many elements as in the initial rewards.
-        """
-        Gs = []
-        Gs.append(rewards[-1])
-        n = len(rewards)
-        gammas = np.array([self.gamma ** i for i in range(n)])
-        for i in range(1, n):
-            Gs.append(rewards[n - i - 1] + self.gamma*Gs[-1])
-        Gs.reverse()
-        return Gs
-
-    def to_one_hot(
-        self,
-        y_tensor: tensor,
-        ndims: int
-    ):
-        """ helper: take an integer vector and convert it to 1-hot matrix. """
-        y_tensor = y_tensor.type(torch.LongTensor).view(-1, 1)
-        y_one_hot = torch.zeros(
-            y_tensor.size()[0], ndims).scatter_(1, y_tensor, 1)
-        return y_one_hot
-
-    def update(
-        self,
-        states: np.ndarray,
-        actions: np.ndarray,
-        rewards: np.ndarray
-    ) -> NoReturn:
-
-        # cast everything into torch tensors
         states = torch.tensor(
             states,
             device=self.device,
-            dtype=torch.float32
+            dtype=torch.float
         )
-        actions = torch.tensor(
-            actions,
-            device=self.device,
-            dtype=torch.int32
-        )
-        cumulative_returns = np.array(
-            self.get_cumulative_rewards(rewards)
-        )
-        cumulative_returns = torch.tensor(
-            cumulative_returns,
-            device=self.device,
-            dtype=torch.float32
-        )
-
-        # predict logits, probas and log-probas using an agent.
         logits = self.model(states)
-        probs = nn.functional.softmax(logits, -1)
-        log_probs = nn.functional.log_softmax(logits, -1)
+        probs = nn.functional.softmax(logits, -1).detach().numpy()[0]
+        return np.random.choice(len(probs), p=probs)
 
-        # select log-probabilities for chosen actions, log pi(a_i|s_i)
-        actions_num = 2
-        log_probs_for_actions = torch.sum(
-            log_probs * self.to_one_hot(actions, actions_num),
-            dim=1
-        )
+    def _get_returns(
+        self,
+        rewards: np.ndarray,
+    ) -> List[float]:
+        """ Count discounted returns from rewards at each step
+        Args:
+            rewards: rewards at each step
+        Returns:
+            Array of discounted returns for each timestep
+        """
+        Gs = [rewards[-1]]
+        for r in rewards[-2::-1]:
+            Gs.append(r + self.gamma * Gs[-1])
 
-        # Compute loss here. Don't forgen entropy regularization with `entropy_coef`
-        entropy = -(probs * log_probs).sum(-1).mean()
-        loss = -torch.mean(
-            log_probs_for_actions * cumulative_returns
-        ) - self.entropy_coef * entropy
+        return Gs[::-1]
+
+    def update(
+        self,
+        trajectories: np.ndarray
+    ) -> NoReturn:
+        """Complete gradient step.
+        Approximate gradient counted using the following formula:
+        grad J = 1 / N * sum_N sum_T grad log_pi_theta(a_t | s_t) * (sum_t'=t^T gamma^(t' - t) * r(s_t, a_t))
+        where:
+            t - length of trajectory
+            N - number of trajectories
+        Args:
+            trajectories: batch of trajectories (states_t, actions, rewards, states_tp1)
+        """
+
+        loss = 0
+
+        for trajectory in trajectories:
+
+            # t - length of trajectory
+            # n - actions number
+            # state_shape - shape of state space
+
+            # [t, state_shape]
+            states_t = torch.tensor(
+                trajectory[0],
+                device=self.device,
+                dtype=torch.float32
+            )
+            # [t]
+            actions = torch.tensor(
+                trajectory[1],
+                device=self.device
+            )
+            # [t]
+            returns = torch.tensor(
+                self._get_returns(trajectory[2]),
+                device=self.device,
+                dtype=torch.float32
+            )
+
+            # predict logits, probas and log-probas using an agent.
+            # [t, n]
+            logits = self.model(states_t)
+            # [t, n]
+            probs = nn.functional.softmax(logits, -1)
+            # [t, n]
+            log_probs = nn.functional.log_softmax(logits, -1)
+
+            # select log-probabilities for chosen actions, log pi(a_i|s_i)
+            # [t, n]
+            actions_selected_mask = torch.nn.functional.one_hot(
+                actions,
+                num_classes=logits.shape[1]
+            )
+            # [t]
+            log_probs_for_actions = torch.sum(
+                log_probs * actions_selected_mask,
+                dim=1
+            )
+
+            loss_trajectory = torch.sum(log_probs_for_actions * returns)
+            entropy = -(probs * log_probs).sum(-1).mean()
+
+            loss += -loss_trajectory - self.entropy_coef * entropy
+
+        loss = loss / len(trajectories)
 
         # Gradient descent step
         self.optimizer.zero_grad()
