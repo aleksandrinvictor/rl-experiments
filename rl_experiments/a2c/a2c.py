@@ -56,6 +56,7 @@ class A2C:
             # t - length of trajectory
             # n - actions number
             # state_shape - shape of state space
+
             # [t, state_shape]
             states_t = torch.tensor(
                 trajectory[0],
@@ -65,8 +66,7 @@ class A2C:
             # [t]
             actions = torch.tensor(
                 trajectory[1],
-                device=self.device,
-                # dtype=torch.int32
+                device=self.device
             )
             # [t]
             returns = torch.tensor(
@@ -74,11 +74,6 @@ class A2C:
                 device=self.device,
                 dtype=torch.float32
             )
-            # states_tp1 = torch.tensor(
-            #     states_tp1,
-            #     device=self.device,
-            #     dtype=torch.float32
-            # )
 
             # predict logits, probas and log-probas using an agent.
             # [t, n]
@@ -87,34 +82,25 @@ class A2C:
             probs = nn.functional.softmax(logits, -1)
             # [t, n]
             log_probs = nn.functional.log_softmax(logits, -1)
-            # print(log_probs)
-            # print(log_probs.shape)
 
-            # # select log-probabilities for chosen actions, log pi(a_i|s_i)
-            actions_selected = torch.nn.functional.one_hot(
+            # select log-probabilities for chosen actions, log pi(a_i|s_i)
+            # [t, n]
+            actions_selected_mask = torch.nn.functional.one_hot(
                 actions,
                 num_classes=logits.shape[1]
             )
+            # [t]
             log_probs_for_actions = torch.sum(
-                log_probs * actions_selected,
+                log_probs * actions_selected_mask,
                 dim=1
             )
-            # print(log_probs_for_actions)
-            # print(log_probs_for_actions.shape)
 
-            loss_trajectory = torch.mean(log_probs_for_actions * returns)
+            loss_trajectory = torch.sum(log_probs_for_actions * returns)
+            entropy = -(probs * log_probs).sum(-1).mean()
 
-            loss -= loss_trajectory
-
-        # # Compute loss here. Don't forgen entropy regularization with `entropy_coef`
-        # entropy = -(probs * log_probs).sum(-1).mean()
-        # loss = torch.sum(
-        #     log_probs_for_actions * returns
-        # ) - self.entropy_coef * entropy
-        # print(loss)
+            loss += -loss_trajectory - self.entropy_coef * entropy
 
         loss = loss / len(trajectories)
-        # print(loss)
 
         # Gradient descent step
         self.optimizer.zero_grad()

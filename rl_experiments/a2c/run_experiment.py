@@ -1,6 +1,6 @@
 from a2c import A2C
 from torch.utils.tensorboard import SummaryWriter
-from rl_experiments.common.models import MLP, Cnn, MLP_test
+from rl_experiments.common.models import MLP, Cnn
 from rl_experiments.common.utils import make_env, get_env_type
 from rl_experiments.common.sampler import Sampler
 
@@ -59,7 +59,6 @@ def evaluate(env, agent, t_max=10000):
 
 
 def main():
-    # print(np.random.choice(3, p=[0.9, 0.01, 0.09]))
     env = make_env('CartPole-v1', 42)
     state_shape, n_actions = env.observation_space.shape, env.action_space.n
 
@@ -68,13 +67,6 @@ def main():
     agent = A2C(model)
 
     train(sampler, agent)
-
-    # trajectories = sampler.sample(agent)
-
-    # print(trajectories[:, 0])
-    # print(trajectories[0][2])
-    # print(rewards)
-    # print(states_tp1)
 
 
 if __name__ == '__main__':
