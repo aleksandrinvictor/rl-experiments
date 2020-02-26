@@ -49,13 +49,13 @@ def record_video(env_name: str, agent: object, output_path: str):
 
 
 def train(
+    num_epochs: int,
     env_name: str,
     sampler: Sampler,
     agent: REINFORCE,
     eval_frequency: int
 ):
 
-    num_epochs = total_steps // (trajectory_length * batch_size)
     for epoch in range(num_epochs):
         trajectories = sampler.sample(agent)
         agent.update(trajectories)
@@ -74,7 +74,7 @@ def train(
 
 @click.command()
 @click.option('-e', '--env_name', type=str, default='CartPole-v1')
-@click.option('-t', '--total_steps', type=float, default=4*10**4)
+@click.option('-n', '--num_epochs', type=int, default=5000)
 @click.option('-batch_size', '--batch_size', type=int, default=1)
 @click.option('-traj_len', '--trajectory_length', type=int, default=int(10**6))
 @click.option('-gamma', '--gamma', type=float, default=0.99)
@@ -85,7 +85,7 @@ def train(
 @click.option('-seed', '--seed', type=int, default=42)
 def main(
     env_name: str,
-    total_steps: int,
+    num_epochs: int,
     batch_size: int,
     trajectory_length: int,
     gamma: float,
@@ -138,6 +138,7 @@ def main(
     )
 
     train(
+        num_epochs,
         env_name,
         sampler,
         agent,
