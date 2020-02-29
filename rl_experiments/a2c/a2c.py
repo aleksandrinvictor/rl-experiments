@@ -1,5 +1,5 @@
 from torch import tensor
-from typing import NoReturn
+from typing import NoReturn, Dict, List, Any
 
 import torch
 import torch.nn as nn
@@ -11,8 +11,8 @@ class A2C:
     def __init__(
         self,
         model: nn.Module,
-        lr: float = 1e-4,
-        entropy_coef: float = 1e-2,
+        lr: float = 3e-4,
+        entropy_coef: float = 1e-3,
         gamma: float = 0.99,
         device: str = 'cpu'
     ):
@@ -29,15 +29,20 @@ class A2C:
             device=self.device,
             dtype=torch.float
         )
-        logits = self.model(states)
+        logits, _ = self.model(states)
         probs = nn.functional.softmax(logits, -1).detach().numpy()[0]
         return np.random.choice(len(probs), p=probs)
 
-    def _get_returns(
+    def _get_return(
         self,
-        rewards: np.ndarray,  # rewards at each step
+        rewards: np.ndarray,
     ) -> tensor:
-
+        """ Count discounted returns from rewards at each step
+        Args:
+            rewards: rewards at each step
+        Returns:
+            Array of discounted returns for each timestep
+        """
         Gs = [rewards[-1]]
         for r in rewards[-2::-1]:
             Gs.append(r + self.gamma * Gs[-1])
@@ -46,61 +51,62 @@ class A2C:
 
     def update(
         self,
-        trajectories: np.ndarray
+        rollout: Dict[str, List[Any]]
     ) -> NoReturn:
 
         loss = 0
 
-        for trajectory in trajectories:
+        # n - actions num
+        # t - length of rollout
+        # [t]
+        discounted_returns = torch.tensor(
+            self._get_return(rollout['rewards']),
+            device=self.device,
+            dtype=torch.float32
+        )
 
-            # t - length of trajectory
-            # n - actions number
-            # state_shape - shape of state space
+        state_t = torch.tensor(
+            rollout['states_t'],
+            device=self.device,
+            dtype=torch.float32
+        )
 
-            # [t, state_shape]
-            states_t = torch.tensor(
-                trajectory[0],
-                device=self.device,
-                dtype=torch.float32
-            )
-            # [t]
-            actions = torch.tensor(
-                trajectory[1],
-                device=self.device
-            )
-            # [t]
-            returns = torch.tensor(
-                self._get_returns(trajectory[2]),
-                device=self.device,
-                dtype=torch.float32
-            )
+        actions = torch.tensor(
+            rollout['actions'],
+            device=self.device,
+        )
 
-            # predict logits, probas and log-probas using an agent.
-            # [t, n]
-            logits = self.model(states_t)
-            # [t, n]
-            probs = nn.functional.softmax(logits, -1)
-            # [t, n]
-            log_probs = nn.functional.log_softmax(logits, -1)
+        logits, values = self.model(state_t)
 
-            # select log-probabilities for chosen actions, log pi(a_i|s_i)
-            # [t, n]
-            actions_selected_mask = torch.nn.functional.one_hot(
-                actions,
-                num_classes=logits.shape[1]
-            )
-            # [t]
-            log_probs_for_actions = torch.sum(
-                log_probs * actions_selected_mask,
-                dim=1
-            )
+        probs = nn.functional.softmax(logits, -1)
 
-            loss_trajectory = torch.sum(log_probs_for_actions * returns)
-            entropy = -(probs * log_probs).sum(-1).mean()
+        log_probs = nn.functional.log_softmax(logits, -1)
 
-            loss += -loss_trajectory - self.entropy_coef * entropy
+        # select log-probabilities for chosen actions, log pi(a_i|s_i)
+        actions_selected_mask = torch.nn.functional.one_hot(
+            actions,
+            num_classes=log_probs.shape[1]
+        )
 
-        loss = loss / len(trajectories)
+        log_probs_for_actions = torch.sum(
+            log_probs * actions_selected_mask,
+            dim=1
+        )
+
+        state_tpn = torch.tensor(
+            rollout['states_tp1'][-1],
+            dtype=torch.float
+        )
+        _, value_tpn = self.model(state_tpn)
+        value_tpn = value_tpn * self.gamma ** len(discounted_returns)
+
+        advantage = discounted_returns + value_tpn - values
+        entropy = -(probs * log_probs).sum(-1).mean()
+
+        actor_loss = (-log_probs_for_actions * advantage.detach()).mean()
+        critic_loss = advantage.pow(2).mean()
+
+        loss = actor_loss + critic_loss - self.entropy_coef * entropy
 
         # Gradient descent step
         self.optimizer.zero_grad()
