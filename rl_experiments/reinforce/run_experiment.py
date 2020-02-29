@@ -2,6 +2,8 @@ from reinforce import REINFORCE
 from torch.utils.tensorboard import SummaryWriter
 from rl_experiments.common.models import MLP, Cnn
 from rl_experiments.common.utils import make_env, get_env_type
+from rl_experiments.common.sampler import Sampler
+from typing import Dict, Any, List, NoReturn
 
 import gym
 import numpy as np
@@ -13,47 +15,6 @@ import os
 import random
 
 
-def predict_probs(agent: REINFORCE, states: np.ndarray):
-    """ 
-    Predict action probabilities given states.
-    :param states: numpy array of shape [batch, state_shape]
-    :returns: numpy array of shape [batch, n_actions]
-    """
-    # convert states, compute logits, use softmax to get probability
-    states = torch.tensor(states, dtype=torch.float)
-    logits = agent.model(states)
-    return nn.functional.softmax(logits).detach().numpy()
-
-
-def generate_session(env, agent, t_max=1000):
-    """ 
-    play a full session with REINFORCE agent and train at the session end.
-    returns sequences of states, actions andrewards
-    """
-    # arrays to record session
-    states, actions, rewards = [], [], []
-    s = env.reset()
-
-    for t in range(t_max):
-        # action probabilities array aka pi(a|s)
-        action_probs = predict_probs(agent, np.array([s]))[0]
-
-        # Sample action with given probabilities.
-        a = np.random.choice([0, 1], p=action_probs)
-        new_s, r, done, info = env.step(a)
-
-        # record session history to train later
-        states.append(s)
-        actions.append(a)
-        rewards.append(r)
-
-        s = new_s
-        if done:
-            break
-
-    return states, actions, rewards
-
-
 def evaluate(env, agent, t_max=10000):
     """ Plays n_games full games. If greedy, picks actions as argmax(qvalues). Returns mean reward. """
     s = env.reset()
@@ -61,9 +22,7 @@ def evaluate(env, agent, t_max=10000):
     n_episodes = 0
     episode_reward = 0
     for _ in range(t_max):
-        action_probs = predict_probs(agent, np.array([s]))[0]
-        # Sample action with given probabilities.
-        action = np.random.choice([0, 1], p=action_probs)
+        action = agent.get_actions(np.array([s]))
         s, r, done, _ = env.step(action)
         episode_reward += r
         if done:
@@ -91,45 +50,44 @@ def record_video(env_name: str, agent: object, output_path: str):
 
 
 def train(
-    env: object,
     env_name: str,
-    agent: object,
-    # total_steps: int,
-    # eval_frequency: int,
-    # writer: SummaryWriter,
-    # batch_size: int = None,
-    # timesteps_per_epoch: int = 1,
-):
-    for i in range(100):
-        for j in range(100):
-            states, actions, rewards = generate_session(env, agent)
-            agent.update(states, actions, rewards)
+    sampler: Sampler,
+    agent: REINFORCE,
+    total_steps: int,
+    eval_frequency: int
+) -> NoReturn:
 
-        # Eval the agent
-        eval_reward = evaluate(
-            make_env(env_name, seed=int(i)),
-            agent,
-            t_max=10000
-        )
-        logger.info(
-            f'step: {i}, mean_reward_per_episode: {eval_reward}'
-        )
+    num_epochs = int(total_steps // sampler.n_steps) + 1
+    for epoch in range(num_epochs):
+        rollout: Dict[str, List[Any]] = sampler.sample(agent)
+        agent.update(rollout)
 
-    return None
+        if epoch % eval_frequency == 0:
+            # Eval the agent
+            eval_reward = evaluate(
+                make_env(env_name, seed=int(epoch)),
+                agent,
+                t_max=10000
+            )
+            print(
+                f'step: {epoch}, mean_reward_per_episode: {eval_reward}'
+            )
 
 
 @click.command()
 @click.option('-e', '--env_name', type=str, default='CartPole-v1')
-@click.option('-t', '--total_steps', type=float, default=4*10**4)
+@click.option('-t', '--total_steps', type=int, default=9*10**5)
+@click.option('-n_steps', '--rollout_n_steps', type=int, default=300)
 @click.option('-gamma', '--gamma', type=float, default=0.99)
-@click.option('-lr', '--learning_rate', type=float, default=1e-4)
-@click.option('-entropy', '--entropy_coef', type=float, default=0.1)
-@click.option('-eval', '--eval_frequency', type=int, default=1000)
+@click.option('-lr', '--learning_rate', type=float, default=3e-4)
+@click.option('-entropy', '--entropy_coef', type=float, default=1e-3)
+@click.option('-eval', '--eval_frequency', type=int, default=100)
 @click.option('-o', '--output_path', type=str, default='./runs')
 @click.option('-seed', '--seed', type=int, default=42)
 def main(
     env_name: str,
     total_steps: int,
+    rollout_n_steps: int,
     gamma: float,
     learning_rate: float,
     entropy_coef: float,
@@ -168,6 +126,9 @@ def main(
     elif env_type == 'classic_control':
         model = MLP(state_shape, n_actions).to(device)
 
+    # Setup sampler
+    sampler = Sampler(env, n_steps=rollout_n_steps)
+
     agent = REINFORCE(
         model,
         learning_rate,
@@ -177,9 +138,11 @@ def main(
     )
 
     train(
-        env,
         env_name,
-        agent
+        sampler,
+        agent,
+        total_steps,
+        eval_frequency
     )
 
     record_video(env_name, agent, output_path)
