@@ -27,7 +27,7 @@ def make_env(env_name: str, seed=None):
         raise ValueError('Unknown environment name')
 
     if env_type == 'classic_control':
-        env = gym.make(env_name).unwrapped
+        env = gym.make(env_name)
     elif env_type == 'atari':
         env = gym.make(env_name)
         assert 'NoFrameskip' in env.spec.id
