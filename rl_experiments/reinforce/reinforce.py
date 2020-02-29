@@ -58,70 +58,59 @@ class REINFORCE:
 
     def update(
         self,
-        trajectories: np.ndarray
+        trajectory: np.ndarray
     ) -> NoReturn:
         """Complete gradient step.
-        Approximate gradient counted using the following formula:
-        grad J = 1 / N * sum_N sum_T grad log_pi_theta(a_t | s_t) * (sum_t'=t^T gamma^(t' - t) * r(s_t, a_t))
-        where:
-            t - length of trajectory
-            N - number of trajectories
         Args:
             trajectories: batch of trajectories (states_t, actions, rewards, states_tp1)
         """
 
-        loss = 0
+        # t - length of trajectory
+        # n - actions number
+        # state_shape - shape of state space
 
-        for trajectory in trajectories:
+        # [t, state_shape]
+        states_t = torch.tensor(
+            trajectory['states_t'],
+            device=self.device,
+            dtype=torch.float32
+        )
+        # [t]
+        actions = torch.tensor(
+            trajectory['actions'],
+            device=self.device
+        )
+        # [t]
+        returns = torch.tensor(
+            self._get_returns(trajectory['rewards']),
+            device=self.device,
+            dtype=torch.float32
+        )
 
-            # t - length of trajectory
-            # n - actions number
-            # state_shape - shape of state space
+        # predict logits, probas and log-probas using an agent.
+        # [t, n]
+        logits = self.model(states_t)
+        # [t, n]
+        probs = nn.functional.softmax(logits, -1)
+        # [t, n]
+        log_probs = nn.functional.log_softmax(logits, -1)
 
-            # [t, state_shape]
-            states_t = torch.tensor(
-                trajectory[0],
-                device=self.device,
-                dtype=torch.float32
-            )
-            # [t]
-            actions = torch.tensor(
-                trajectory[1],
-                device=self.device
-            )
-            # [t]
-            returns = torch.tensor(
-                self._get_returns(trajectory[2]),
-                device=self.device,
-                dtype=torch.float32
-            )
+        # select log-probabilities for chosen actions, log pi(a_i|s_i)
+        # [t, n]
+        actions_selected_mask = torch.nn.functional.one_hot(
+            actions,
+            num_classes=logits.shape[1]
+        )
+        # [t]
+        log_probs_for_actions = torch.sum(
+            log_probs * actions_selected_mask,
+            dim=1
+        )
 
-            # predict logits, probas and log-probas using an agent.
-            # [t, n]
-            logits = self.model(states_t)
-            # [t, n]
-            probs = nn.functional.softmax(logits, -1)
-            # [t, n]
-            log_probs = nn.functional.log_softmax(logits, -1)
+        loss_trajectory = torch.mean(log_probs_for_actions * returns)
+        entropy = -(probs * log_probs).sum(-1).mean()
 
-            # select log-probabilities for chosen actions, log pi(a_i|s_i)
-            # [t, n]
-            actions_selected_mask = torch.nn.functional.one_hot(
-                actions,
-                num_classes=logits.shape[1]
-            )
-            # [t]
-            log_probs_for_actions = torch.sum(
-                log_probs * actions_selected_mask,
-                dim=1
-            )
-
-            loss_trajectory = torch.sum(log_probs_for_actions * returns)
-            entropy = -(probs * log_probs).sum(-1).mean()
-
-            loss += -loss_trajectory - self.entropy_coef * entropy
-
-        loss = loss / len(trajectories)
+        loss = -loss_trajectory - self.entropy_coef * entropy
 
         # Gradient descent step
         self.optimizer.zero_grad()

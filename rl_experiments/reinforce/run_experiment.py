@@ -3,6 +3,7 @@ from torch.utils.tensorboard import SummaryWriter
 from rl_experiments.common.models import MLP, Cnn
 from rl_experiments.common.utils import make_env, get_env_type
 from rl_experiments.common.sampler import Sampler
+from typing import Dict, Any, List, NoReturn
 
 import gym
 import numpy as np
@@ -49,16 +50,17 @@ def record_video(env_name: str, agent: object, output_path: str):
 
 
 def train(
-    num_epochs: int,
     env_name: str,
     sampler: Sampler,
     agent: REINFORCE,
+    total_steps: int,
     eval_frequency: int
-):
+) -> NoReturn:
 
+    num_epochs = int(total_steps // sampler.n_steps) + 1
     for epoch in range(num_epochs):
-        trajectories = sampler.sample(agent)
-        agent.update(trajectories)
+        rollout: Dict[str, List[Any]] = sampler.sample(agent)
+        agent.update(rollout)
 
         if epoch % eval_frequency == 0:
             # Eval the agent
@@ -74,20 +76,18 @@ def train(
 
 @click.command()
 @click.option('-e', '--env_name', type=str, default='CartPole-v1')
-@click.option('-n', '--num_epochs', type=int, default=5000)
-@click.option('-batch_size', '--batch_size', type=int, default=1)
-@click.option('-traj_len', '--trajectory_length', type=int, default=int(10**6))
+@click.option('-t', '--total_steps', type=int, default=9*10**5)
+@click.option('-n_steps', '--rollout_n_steps', type=int, default=300)
 @click.option('-gamma', '--gamma', type=float, default=0.99)
-@click.option('-lr', '--learning_rate', type=float, default=1e-4)
-@click.option('-entropy', '--entropy_coef', type=float, default=0.1)
+@click.option('-lr', '--learning_rate', type=float, default=3e-4)
+@click.option('-entropy', '--entropy_coef', type=float, default=1e-3)
 @click.option('-eval', '--eval_frequency', type=int, default=100)
 @click.option('-o', '--output_path', type=str, default='./runs')
 @click.option('-seed', '--seed', type=int, default=42)
 def main(
     env_name: str,
-    num_epochs: int,
-    batch_size: int,
-    trajectory_length: int,
+    total_steps: int,
+    rollout_n_steps: int,
     gamma: float,
     learning_rate: float,
     entropy_coef: float,
@@ -127,7 +127,7 @@ def main(
         model = MLP(state_shape, n_actions).to(device)
 
     # Setup sampler
-    sampler = Sampler(env, batch_size=batch_size, n_steps=trajectory_length)
+    sampler = Sampler(env, n_steps=rollout_n_steps)
 
     agent = REINFORCE(
         model,
@@ -138,10 +138,10 @@ def main(
     )
 
     train(
-        num_epochs,
         env_name,
         sampler,
         agent,
+        total_steps,
         eval_frequency
     )
 
