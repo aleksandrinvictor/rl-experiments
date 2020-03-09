@@ -1,0 +1,4 @@
+algorithm:
+  name: reinforce
+  gamma: 0.99
+  entropy_coef: 0.001

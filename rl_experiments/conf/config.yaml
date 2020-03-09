@@ -1,0 +1,9 @@
+defaults:
+  - env: cartpole
+  - algorithm: a2c
+  - train_spec: a2c
+  - optimizer: adam
+
+common:
+  seed: 42
+  output_path: './runs'

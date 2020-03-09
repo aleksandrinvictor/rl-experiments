@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch
 import copy
 import numpy as np
+import copy
 
 
 class DQN:
@@ -14,7 +15,6 @@ class DQN:
         self,
         algorithm_type: str,
         model: nn.Module,
-        target_network: nn.Module,
         refresh_target_network_freq: int,
         epsilon: float,
         gamma: float,
@@ -25,7 +25,7 @@ class DQN:
 
         self.algorithm_type = algorithm_type
         self.model = model
-        self.target_network = target_network
+        self.target_network = copy.deepcopy(model)
         self.refresh_target_network_freq = refresh_target_network_freq
         self.gamma = gamma
         self.epsilon = epsilon

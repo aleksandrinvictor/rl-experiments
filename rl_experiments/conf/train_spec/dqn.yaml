@@ -1,0 +1,4 @@
+train_spec:
+  total_steps: 40000
+  rollout_n_steps: 1
+  eval_frequency: 1000
