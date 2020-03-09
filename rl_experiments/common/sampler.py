@@ -14,19 +14,23 @@ class Sampler:
         self.current_state = env.reset()
         self.n_steps = n_steps
 
-    def sample(self, agent):
+    def sample(self, agent, **kwargs):
         trajectories = []
 
-        states_t, actions, rewards, states_tp1 = [], [], [], []
+        states_t, actions, rewards, states_tp1, dones = [], [], [], [], []
 
         for j in range(self.n_steps):
-            action = agent.get_actions(np.array([self.current_state]))
+            action = agent.get_actions(
+                np.array([self.current_state]),
+                **kwargs
+            )
             next_state, reward, done, _ = self.env.step(action)
 
             states_t.append(self.current_state)
             actions.append(action)
             rewards.append(reward)
             states_tp1.append(next_state)
+            dones.append(done)
 
             self.current_state = next_state
             if done:
@@ -38,4 +42,5 @@ class Sampler:
             'actions': actions,
             'rewards': rewards,
             'states_tp1': states_tp1,
+            'dones': dones
         }

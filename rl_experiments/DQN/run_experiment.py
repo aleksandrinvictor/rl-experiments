@@ -2,7 +2,8 @@ from torch.utils.tensorboard import SummaryWriter
 from rl_experiments.common.replay_buffer import ReplayBuffer, PrioritizedReplayBuffer
 from rl_experiments.common.models import MLP, Cnn, DuelingCnn
 from rl_experiments.common.utils import LinearDecay, make_env, get_env_type
-from agents import VanillaDQNAgent, DoubleDQNAgent
+from rl_experiments.common.sampler import Sampler
+from dqn import DQN
 from tqdm import tqdm, trange
 from typing import Callable
 
@@ -15,29 +16,6 @@ import torch
 import random
 
 
-def play_and_record(initial_state, agent, env, replay_buffer, n_steps=1):
-    """
-    Play the game for exactly n steps, record every (s,a,r,s', done) to replay buffer.
-    Whenever game ends, add record with done=True and reset the game.
-    It is guaranteed that env has done=False when passed to this function.
-
-    :returns: return sum of rewards over time and the state in which the env stays
-    """
-    s = initial_state
-
-    # Play the game for n_steps as per instructions above
-    for i in range(n_steps):
-        action = agent.sample_actions([s])[0]
-        next_s, r, done, _ = env.step(action)
-
-        replay_buffer.add(s, action, r, next_s, done)
-        s = next_s
-        if done:
-            s = env.reset()
-
-    return s
-
-
 def evaluate(env, agent, greedy=False, t_max=10000):
     """ Plays n_games full games. If greedy, picks actions as argmax(qvalues). Returns mean reward. """
     s = env.reset()
@@ -45,7 +23,7 @@ def evaluate(env, agent, greedy=False, t_max=10000):
     n_episodes = 0
     episode_reward = 0
     for _ in range(t_max):
-        action = agent.sample_actions([s], greedy)[0]
+        action = agent.get_actions([s], greedy)[0]
         s, r, done, _ = env.step(action)
         episode_reward += r
         if done:
@@ -61,7 +39,7 @@ def evaluate(env, agent, greedy=False, t_max=10000):
 
 
 def train(
-    env: object,
+    sampler: Sampler,
     env_name: str,
     agent: object,
     total_steps: int,
@@ -72,21 +50,19 @@ def train(
     prioritized_replay: bool = False,
     prioritized_beta_tracker: Callable = None,
     prioritized_replay_eps: float = None,
-    batch_size: int = None,
-    timesteps_per_epoch: int = 1,
+    batch_size: int = None
 ):
-
-    state = env.reset()
 
     for step in trange(int(total_steps + 1)):
 
-        # Play timesteps_per_epoch and return last state
-        state = play_and_record(
-            state,
-            agent,
-            env,
-            replay_buffer,
-            timesteps_per_epoch
+        # Play one step in environment
+        rollout = sampler.sample(agent)
+        replay_buffer.add(
+            rollout['states_t'][0],
+            rollout['actions'][0],
+            rollout['rewards'][0],
+            rollout['states_tp1'][0],
+            rollout['dones'][0]
         )
 
         # Update epsilon
@@ -140,9 +116,18 @@ def train(
             )
 
 
-def fill_buffer(state, env, agent, replay_buffer, replay_buffer_start_size):
-    play_and_record(state, agent, env, replay_buffer,
-                    n_steps=replay_buffer_start_size)
+def fill_buffer(state, env, agent, replay_buffer, replay_buffer_start_size, sampler: Sampler):
+    for i in range(replay_buffer_start_size):
+        rollout = sampler.sample(agent)
+        replay_buffer.add(
+            rollout['states_t'][0],
+            rollout['actions'][0],
+            rollout['rewards'][0],
+            rollout['states_tp1'][0],
+            rollout['dones'][0]
+        )
+    # play_and_record(state, agent, env, replay_buffer,
+    #                 n_steps=replay_buffer_start_size)
 
     return replay_buffer
 
@@ -230,6 +215,8 @@ def main(
     logger.info(f'State shape: {state_shape}')
     logger.info(f'n actions: {n_actions}')
 
+    sampler = Sampler(env, n_steps=1)
+
     # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f'Device: {device}')
@@ -270,41 +257,30 @@ def main(
         target_network.load_state_dict(model.state_dict())
 
     # Create Q-learning agent
-    if agent_type == 'vanilla':
-        agent = VanillaDQNAgent(
-            model,
-            target_network,
-            refresh_target_network_freq,
-            start_epsilon,
-            gamma,
-            learning_rate,
-            max_grad_norm,
-            device
-        )
-    elif agent_type == 'double':
-        agent = DoubleDQNAgent(
-            model,
-            target_network,
-            refresh_target_network_freq,
-            start_epsilon,
-            gamma,
-            learning_rate,
-            max_grad_norm,
-            device=device
-        )
-    # print(evaluate(env, agent, n_games=15))
+    agent = DQN(
+        agent_type,
+        model,
+        target_network,
+        refresh_target_network_freq,
+        start_epsilon,
+        gamma,
+        learning_rate,
+        max_grad_norm,
+        device
+    )
     # Fill replay buffer with tuples (state, action, reward, next_state, done)
     replay_buffer = fill_buffer(
         env.reset(),
         env,
         agent,
         replay_buffer,
-        replay_buffer_start_size
+        replay_buffer_start_size,
+        sampler
     )
 
     # Run training
     train(
-        env,
+        sampler,
         env_name,
         agent,
         total_steps,

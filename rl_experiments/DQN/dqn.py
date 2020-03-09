@@ -9,23 +9,22 @@ import copy
 import numpy as np
 
 
-class VanillaDQNAgent:
-
+class DQN:
     def __init__(
         self,
+        algorithm_type: str,
         model: nn.Module,
         target_network: nn.Module,
         refresh_target_network_freq: int,
         epsilon: float,
-        gamma: float = 0.99,
-        lr: float = 1e-4,
-        max_grad_norm: float = None,
-        device: str = 'cpu'
+        gamma: float,
+        lr: float,
+        max_grad_norm: float,
+        device: str
     ):
 
+        self.algorithm_type = algorithm_type
         self.model = model
-        # self.model.to(device)
-
         self.target_network = target_network
         self.refresh_target_network_freq = refresh_target_network_freq
         self.gamma = gamma
@@ -63,17 +62,22 @@ class VanillaDQNAgent:
 
         loss.backward()
 
-        # if self.max_grad_norm is not None:
-        grad_norm = nn.utils.clip_grad_value_(
-            self.model.parameters(),
-            1
-        )
+        if self.max_grad_norm is not None:
+            grad_norm = nn.utils.clip_grad_value_(
+                self.model.parameters(),
+                self.max_grad_norm
+            )
 
         self.optimizer.step()
         self.optimizer.zero_grad()
 
         if writer is not None:
-            # writer.add_scalar('train_params/grad_norm', grad_norm, step)
+            if self.max_grad_norm is not None:
+                writer.add_scalar(
+                    'train_params/grad_norm',
+                    self.max_grad_norm, step
+                )
+
             writer.add_scalar('train_params/td_loss',
                               loss.data.cpu().item(), step)
 
@@ -111,16 +115,24 @@ class VanillaDQNAgent:
         # get q-values for all actions in current states
         predicted_qvalues = self.model(states)
 
-        # compute q-values for all actions in next states
-        predicted_next_qvalues = self.target_network(next_states)
-
         # select q-values for chosen actions
         predicted_qvalues_for_actions = predicted_qvalues[
             range(len(actions)), actions
         ]
 
-        # compute V*(next_states) = max_a' Q_target(s', a') using predicted next q-values
-        next_state_values = torch.max(predicted_next_qvalues, -1)[0]
+        if self.algorithm_type == 'vanilla':
+            # compute q-values for all actions in next states
+            predicted_next_qvalues = self.target_network(next_states)
+
+            # compute V*(next_states) = max_a' Q_target(s', a') using predicted next q-values
+            next_state_values = torch.max(predicted_next_qvalues, -1)[0]
+        elif self.algorithm_type == 'double':
+            # compute q-values for all actions in next states
+            # using following folmula: V*(next_states) = Q_target(s', argmax_a' Q(s', a'))
+            predicted_next_qvalues = self.model(next_states)
+            optimal_actions = torch.argmax(predicted_next_qvalues, -1)[0]
+            next_state_values = self.target_network(
+                next_states)[:, optimal_actions]
 
         # Compute "target q-values" for loss
         # If current state is the last state => r(s, a) + max_a' Q_target(s', a') = r(s, a)
@@ -137,7 +149,7 @@ class VanillaDQNAgent:
 
         return td_errors
 
-    def sample_actions(self, states: List[np.ndarray], greedy: bool = False) -> np.ndarray:
+    def get_actions(self, states: List[np.ndarray], greedy: bool = False) -> np.ndarray:
         """pick actions given qvalues. Uses epsilon-greedy exploration strategy. """
         qvalues = self.model.get_qvalues(states)
         epsilon = self.epsilon
@@ -154,80 +166,4 @@ class VanillaDQNAgent:
                 batch_size,
                 p=[1-epsilon, epsilon]
             )
-            return np.where(should_explore, random_actions, best_actions)
-
-
-class DoubleDQNAgent(VanillaDQNAgent):
-    def __init__(
-        self,
-        model: nn.Module,
-        target_network: nn.Module,
-        refresh_target_network_freq: int,
-        epsilon: float,
-        gamma: float = 0.99,
-        lr: float = 1e-4,
-        max_grad_norm: float = None,
-        device: str = 'cpu'
-    ):
-        super().__init__(
-            model,
-            target_network,
-            refresh_target_network_freq,
-            epsilon,
-            gamma,
-            lr,
-            max_grad_norm,
-            device
-        )
-
-    def compute_td_errors(
-        self,
-        states: np.ndarray,
-        actions: np.ndarray,
-        rewards: np.ndarray,
-        next_states: np.ndarray,
-        is_done: np.ndarray
-    ) -> tensor:
-
-        # Batch of states and next states of shape: [batch_size, *state_shape]
-        states = torch.tensor(states, device=self.device, dtype=torch.float)
-        next_states = torch.tensor(
-            next_states, device=self.device, dtype=torch.float)
-
-        # Batches of actions, rewards and done flag of shape: [batch_size]
-        actions = torch.tensor(actions, device=self.device, dtype=torch.long)
-        rewards = torch.tensor(rewards, device=self.device, dtype=torch.float)
-        is_done = torch.tensor(
-            is_done.astype('float32'),
-            device=self.device,
-            dtype=torch.float
-        )
-        is_not_done = 1 - is_done
-
-        # get q-values for all actions in current states
-        predicted_qvalues = self.model(states)
-        # select q-values for chosen actions
-        predicted_qvalues_for_actions = predicted_qvalues[
-            range(len(actions)), actions
-        ]
-
-        # compute q-values for all actions in next states
-        # using following folmula: V*(next_states) = Q_target(s', argmax_a' Q(s', a'))
-        predicted_next_qvalues = self.model(next_states)
-        optimal_actions = torch.argmax(predicted_next_qvalues, -1)[0]
-        next_state_values = self.target_network(
-            next_states)[:, optimal_actions]
-
-        # Compute "target q-values" for loss
-        # If current state is the last state => r(s, a) + Q_target(s', argmax_a' Q(s', a')) = r(s, a)
-        # To achieve this we will apply is_not_done mask that is 0 when episode completed
-        target_qvalues_for_actions = rewards + \
-            self.gamma * next_state_values * is_not_done
-
-        # Compute TD-error
-        # mean squared error loss to minimize
-        # Detaching target_qvalues_for_actions required
-        # to not pass gradient through target network
-        td_errors = predicted_qvalues_for_actions - target_qvalues_for_actions.detach()
-
-        return td_errors
+            return np.where(should_explore, random_actions, best_actions)[0]
