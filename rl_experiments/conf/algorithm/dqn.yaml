@@ -1,18 +1,4 @@
 algorithm:
   name: dqn
-  type: double
+  algorithm_type: double
   gamma: 0.99
-  start_epsilon: 1.0
-  end_epsilon: 0.01
-  eps_iters: 40000
-  refresh_target_network_freq: 100
-  replay_buffer_start_size: 50000
-  replay_buffer_size: 10000
-  prioritized_replay: False
-  prioritized_replay_alpha: 0.6
-  prioritized_replay_beta_start: 0.4
-  prioritized_replay_beta_end: 1.0
-  prioritized_replay_beta_iters: 40000
-  prioritized_replay_eps: 0.000001
-  replay_batch_size: 32
-  max_grad_norm: 50

@@ -1,9 +1,14 @@
 defaults:
   - env: cartpole
-  - algorithm: a2c
-  - train_spec: a2c
-  - optimizer: adam
+  - algorithm: dqn
+  - train_spec: dqn
+  - optimizer: adam_lr_0_0003
+
+model:
+  type: MLP
 
 common:
+  resume: False
+  checkpoint_path: './'
   seed: 42
-  output_path: './runs'
+  output_path: './'

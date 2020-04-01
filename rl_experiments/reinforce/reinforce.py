@@ -116,3 +116,29 @@ class REINFORCE:
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+
+
+def train(
+    env_name: str,
+    sampler: Sampler,
+    agent: object,
+    total_steps: int,
+    eval_frequency: int
+) -> NoReturn:
+
+    num_epochs = int(total_steps // sampler.n_steps) + 1
+    for epoch in range(num_epochs):
+        trajectory: Dict[str, List[Any]] = sampler.sample(agent)
+
+        agent.update(trajectory)
+
+        if epoch % eval_frequency == 0:
+            # Eval the agent
+            eval_reward = evaluate(
+                make_env(env_name, seed=int(epoch)),
+                agent,
+                t_max=10000
+            )
+            print(
+                f'step: {epoch}, mean_reward_per_episode: {eval_reward}'
+            )
