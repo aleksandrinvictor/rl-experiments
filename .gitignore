@@ -2,5 +2,9 @@
 env/
 .DS_Store
 __pycache__/
-runs/
+outputs/
+build/
+dist/
 .ipynb_checkpoints
+*.ipynb
+rl_experiments.egg-info/

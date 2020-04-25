@@ -191,7 +191,6 @@ smmap2==2.0.5
 snowballstemmer==1.2.1
 Sphinx==1.8.3
 sphinxcontrib-websupport==1.1.0
--e git+https://gitlab.com/georgy_borodin/sibur_tomsk_line_b_dev.git@b38ac476d7acee248c91f3f2ceca2e10056310fa#egg=src
 ssh-import-id==5.7
 statsmodels==0.9.0
 stevedore==1.30.1
