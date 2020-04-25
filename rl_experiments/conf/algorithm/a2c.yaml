@@ -1,0 +1,5 @@
+algorithm:
+  name: a2c
+  gamma: 0.99
+  entropy_coef: 0.001
+  

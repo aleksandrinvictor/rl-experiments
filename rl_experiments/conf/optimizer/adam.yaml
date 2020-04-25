@@ -1,0 +1,5 @@
+optimizer:
+  name: adam
+  lr: 0.0000625
+  eps: 0.00015
+  

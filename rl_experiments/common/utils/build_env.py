@@ -29,15 +29,20 @@ def make_env(env_name: str, seed=None):
     if env_type == 'classic_control':
         env = gym.make(env_name)
     elif env_type == 'atari':
-        env = gym.make(env_name)
-        assert 'NoFrameskip' in env.spec.id
 
-        env = gym.wrappers.AtariPreprocessing(
-            env,
-            terminal_on_life_loss=True,
-        )
-        env = wrappers.ClipRewardEnv(env)
+        # env = gym.make(env_name)
+        # env = wrappers.NoopResetEnv(env)
+        # env = wrappers.MaxAndSkipEnv(env, skip=4)
+        # env = wrappers.EpisodicLifeEnv(env)
+        # env = wrappers.FireResetEnv(env)
+        # env = wrappers.ClipRewardEnv(env)
+        # env = wrappers.WarpFrame(env)
+        # env = wrappers.FrameStack(env, 4)
+        env = gym.make(env_name)
+        env = gym.wrappers.AtariPreprocessing(env, scale_obs=False)
+        env = wrappers.EpisodicLifeEnv(env)
         env = wrappers.FireResetEnv(env)
+        env = wrappers.ClipRewardEnv(env)
         env = gym.wrappers.FrameStack(env, 4)
 
     else:
