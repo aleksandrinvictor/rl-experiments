@@ -1,4 +1,4 @@
 algorithm:
   name: dqn
-  algorithm_type: double
+  algorithm_type: vanilla
   gamma: 0.99

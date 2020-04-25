@@ -15,6 +15,12 @@ import hydra
 import inspect
 
 
+def weights_init(m):
+    if isinstance(m, torch.nn.Conv2d):
+        torch.nn.init.xavier_uniform_(m.weight)
+        if m.bias is not None:
+            torch.nn.init.zeros_(m.bias)
+
 OPTIMIZERS = {
     'adam': torch.optim.Adam,
     'rmsprop': torch.optim.RMSprop
@@ -50,7 +56,9 @@ def main(cfg: DictConfig) -> None:
     models_module = import_module('rl_experiments.common.models')
     models = dict(inspect.getmembers(models_module, inspect.isclass))
 
-    model = models[cfg.model.type](state_shape, n_actions).to(device)
+    model = models[cfg.model.type](state_shape, n_actions)
+    model.apply(weights_init)
+    model.to(device)
 
     optimizer_name = str(cfg.optimizer.pop('name'))
     optimizer = OPTIMIZERS[optimizer_name](model.parameters(), **cfg.optimizer)
@@ -69,7 +77,6 @@ def main(cfg: DictConfig) -> None:
     cfg.algorithm.pop('name')
     agent = alg_module.Agent(
         model=model, optimizer=optimizer, device=device, **cfg.algorithm)
-
     alg_module.train(env=env, agent=agent, writer=writer, **cfg.train_spec)
 
     writer.close()

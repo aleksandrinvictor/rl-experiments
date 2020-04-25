@@ -45,3 +45,12 @@ class DuelingCnn(nn.Module):
         )
 
         return qvalues
+    
+    def get_qvalues(self, states):
+        """
+        like forward, but works on numpy arrays, not tensors
+        """
+        model_device = next(self.parameters()).device
+        states = torch.tensor(states, device=model_device, dtype=torch.float32)
+        qvalues = self.forward(states)
+        return qvalues.data.cpu().numpy()

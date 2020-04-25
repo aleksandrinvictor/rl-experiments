@@ -1,7 +1,7 @@
 train_spec:
-  total_steps: 25000000
+  total_steps: 20000000
   rollout_n_steps: 1
-  eval_frequency: 1000
+  eval_frequency: 200000
   start_epsilon: 1.0
   end_epsilon: 0.1
   eps_iters: 1000000
@@ -9,3 +9,4 @@ train_spec:
   replay_buffer_size: 1000000
   replay_buffer_start_size: 50000
   replay_batch_size: 32
+  update_frequency: 4

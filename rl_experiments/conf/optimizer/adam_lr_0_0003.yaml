@@ -1,4 +1,0 @@
-optimizer:
-  name: adam
-  lr: 0.0003
-  

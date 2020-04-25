@@ -112,8 +112,7 @@ class Agent:
             # using following folmula: V*(next_states) = Q_target(s', argmax_a' Q(s', a'))
             predicted_next_qvalues = self.model(next_states)
             optimal_actions = torch.argmax(predicted_next_qvalues, -1)[0]
-            next_state_values = self.target_network(
-                next_states)[:, optimal_actions]
+            next_state_values = self.target_network(next_states)[:, optimal_actions]
         else:
             raise ValueError(self.algorithm_type)
 
@@ -138,7 +137,7 @@ class Agent:
         random_actions = np.random.choice(n_actions, size=batch_size)
         best_actions = qvalues.argmax(axis=-1)
 
-        if epsilon == 1:  # greedy
+        if epsilon == 0:  # greedy
             return best_actions[0]
         else:
             should_explore = np.random.choice(
@@ -156,6 +155,7 @@ def train(
     rollout_n_steps: int,
     eval_frequency: int,
     writer: SummaryWriter,
+    update_frequency: int = 4,
     start_epsilon: float = 1.0,
     end_epsilon: float = 0.01,
     eps_iters: int = 40000,
@@ -186,6 +186,14 @@ def train(
         end_epsilon,
         eps_iters)
 
+    
+    # Rewards for last 100 episodes
+    episodes_played = 0
+    episode_reward = 0
+    last_100_ep_rewards = np.zeros(100)
+
+    num_updates = 0
+
     for step in trange(int(total_steps + 1)):
 
         current_epsilon = eps_tracker(step)
@@ -197,22 +205,32 @@ def train(
             rollout['rewards'][0],
             rollout['states_tp1'][0],
             rollout['dones'][0])
+        
+        episode_reward += rollout['rewards'][0]
+        if rollout['dones'][0]:
+            episodes_played += 1
+            last_100_ep_rewards[episodes_played % 100] = episode_reward
+            episode_reward = 0
 
         # Sample batch and train agent
-        batch = replay_buffer.sample(replay_batch_size)
-        states, actions, rewards, next_states, is_done = batch
-        weights, batch_idxes = np.ones(len(rewards)), None
+        if step % update_frequency == 0:
+            batch = replay_buffer.sample(replay_batch_size)
+            states, actions, rewards, next_states, is_done = batch
 
-        loss_val, grad_norm = agent.update(
-            states,
-            actions,
-            rewards,
-            next_states,
-            is_done)
+            loss_val, grad_norm = agent.update(
+                states,
+                actions,
+                rewards,
+                next_states,
+                is_done)
+            
+            num_updates += 1
 
+        # Update target network
         if step % refresh_target_network_freq == 0:
             agent.refresh_target_network()
 
+        # Log intermediate values
         writer.add_scalar(
             'train_params/loss', loss_val, step)
 
@@ -221,13 +239,16 @@ def train(
 
         writer.add_scalar('train_params/epsilon', current_epsilon, step)
 
+        writer.add_scalar('eval/mean_100_train_reward',
+                          np.mean(last_100_ep_rewards), step)
+
         if step % eval_frequency == 0:
             # Eval the agent
             eval_reward = evaluate(
                 make_env(env.unwrapped.spec.id, seed=int(step)),
                 agent,
                 10000,
-                **{'epsilon': 1.0})
+                **{'epsilon': 0.05})
 
             logger.info(
                 f'step: {step}, mean_reward_per_episode: {eval_reward}')
@@ -268,7 +289,7 @@ def fill_buffer(
 ) -> ReplayBuffer:
 
     for i in range(replay_buffer_start_size):
-        rollout = sampler.sample(agent, **{'epsilon': 0.0})
+        rollout = sampler.sample(agent, **{'epsilon': 1.0})
         replay_buffer.add(
             rollout['states_t'][0],
             rollout['actions'][0],
